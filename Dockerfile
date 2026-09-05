@@ -33,9 +33,16 @@ COPY --from=build /app/dist ./dist
 # The server reports its version from package.json at runtime.
 COPY package.json package-lock.json ./
 
-# The base image's bundled npm is a frequent source of HIGH findings and this
-# image never installs anything — remove it rather than carrying its CVEs.
-RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+# The base image's bundled package managers are a frequent source of HIGH
+# findings and this image never installs anything — remove them rather than
+# carrying their CVEs. corepack goes with npm for the same reason: it is a
+# package-manager shim in an image whose entrypoint is plain `node`.
+#
+# This does not shrink the image — the files stay in the base layer — but it
+# removes them from the final filesystem, which is what Trivy scans and what a
+# process in the container can reach.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
 # Ownership proof for the MCP Registry: must match server.json's name exactly.
 LABEL io.modelcontextprotocol.server.name="io.github.ni-c/carddav-mcp"

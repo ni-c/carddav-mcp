@@ -5,16 +5,16 @@ body:
   - type: input
     id: version
     attributes:
-      label: 'caldav-mcp version'
-      placeholder: '0.2.3 (npm version, docker tag or commit)'
+      label: 'carddav-mcp version'
+      placeholder: '0.1.0 (npm version, docker tag or commit)'
     validations:
       required: true
   - type: input
     id: target
     attributes:
-      label: CalDAV server and version
+      label: CardDAV server and version
       description: >-
-        Radicale 3.8, Baikal 0.10, Nextcloud 31, iCloud, Fastmail, mailbox.org …
+        Radicale 3.8, Baikal 0.10, Nextcloud 31, iCloud, Fastmail, Google …
         Which server it is matters more here than most: they disagree about
         namespace prefixes, href forms and error preconditions.
     validations:
