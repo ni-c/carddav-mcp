@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="caldav-mcp">
+  <!-- Hand-written, not generated: a favicon has no source that could drift.
+       The indigo is the same #4f46e5 as the theme colour in .vitepress/config.ts,
+       and the mark has to read at 16px, which rules out anything finer than a
+       calendar page with a single marked day. -->
+  <rect width="32" height="32" rx="7" fill="#4f46e5" />
+  <!-- The page, with the two rings above it and the header rule that makes a
+       rectangle read as a calendar rather than as a window. -->
+  <path d="M10.5 6.5v3M21.5 6.5v3" fill="none" stroke="#ffffff" stroke-width="2.2"
+        stroke-linecap="round" />
+  <rect x="6" y="8.5" width="20" height="17.5" rx="2.4" fill="none" stroke="#ffffff"
+        stroke-width="2.2" />
+  <path d="M6 14h20" fill="none" stroke="#ffffff" stroke-width="2.2" />
+  <!-- One day picked out, which is what every tool here is ultimately about.
+       The single #a5b4fc accent the family allows. -->
+  <rect x="13.6" y="17.4" width="4.8" height="4.8" rx="1.2" fill="#a5b4fc" />
+</svg>

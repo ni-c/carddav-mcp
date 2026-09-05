@@ -1,0 +1,6 @@
+{
+  "$comment": "Copy for docs/public/og.png, the GitHub social preview and the OpenGraph card. Rendered by the svg-asset-set package (npm run assets). Tagline and badges are split by hand because the renderer does not wrap text. Optional \"title\" overrides the heading — used here because package.json's name reads as @ni-c/carddav-mcp while the card should say carddav-mcp.",
+  "tagline": ["Contacts, groups and photos", "over the open CardDAV standard"],
+  "badges": ["17 tools", "MIT", "Node ≥22"],
+  "title": "carddav-mcp"
+}

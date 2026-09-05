@@ -1,0 +1,181 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ni-c/carddav-mcp",
+  "title": "CardDAV address books",
+  "description": "Read and write CardDAV address books: contacts, groups and photos over the open standard",
+  "websiteUrl": "https://carddav-mcp.ni-c.de",
+  "repository": {
+    "url": "https://github.com/ni-c/carddav-mcp",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@ni-c/carddav-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "CARDDAV_URL",
+          "description": "Root of the CardDAV server, e.g. https://dav.example.net. An address book collection URL also works.",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "CARDDAV_USERNAME",
+          "description": "Account name. Most hosted services want an app-specific password with it.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "CARDDAV_PASSWORD",
+          "description": "Password or app-specific password. Deleted from the environment once read.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "CARDDAV_TOKEN",
+          "description": "Bearer token, as an alternative to username and password. Not both.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "CARDDAV_ADDRESSBOOKS",
+          "description": "Comma-separated address books this server may touch, by path or final path segment. Default: all of them.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "CARDDAV_MAX_CONTACTS",
+          "description": "Contacts a listing returns by default, 1 to 500 (default: 100)",
+          "isRequired": false,
+          "format": "number"
+        },
+        {
+          "name": "CARDDAV_READ_ONLY",
+          "description": "Set to true to register only the read tools (default: false)",
+          "isRequired": false,
+          "format": "boolean"
+        },
+        {
+          "name": "CARDDAV_INSECURE_TLS",
+          "description": "Set to true to accept a self-signed certificate on the configured host only (default: false)",
+          "isRequired": false,
+          "format": "boolean"
+        },
+        {
+          "name": "CARDDAV_ALLOW_PLAINTEXT",
+          "description": "Set to true to allow a plain http:// URL to a host that is not loopback, which sends the credentials and every contact unencrypted (default: false)",
+          "isRequired": false,
+          "format": "boolean"
+        },
+        {
+          "name": "CARDDAV_ALLOW_TOOLS",
+          "description": "Comma-separated tool names or list_* prefixes to register; 'essential' selects a curated preset (default: all tools)",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "CARDDAV_DENY_TOOLS",
+          "description": "Comma-separated tool names or list_* prefixes to remove from whatever the allow list left",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "ELICITATION",
+          "description": "Deliberately unprefixed, and reaches every MCP server in the environment. Set to false to make guarded tools use the two-call token instead of a dialog (default: true)",
+          "isRequired": false,
+          "format": "boolean"
+        }
+      ]
+    },
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/ni-c/carddav-mcp:0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "CARDDAV_URL",
+          "description": "Root of the CardDAV server, e.g. https://dav.example.net. An address book collection URL also works.",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "CARDDAV_USERNAME",
+          "description": "Account name. Most hosted services want an app-specific password with it.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "CARDDAV_PASSWORD",
+          "description": "Password or app-specific password. Deleted from the environment once read.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "CARDDAV_TOKEN",
+          "description": "Bearer token, as an alternative to username and password. Not both.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "CARDDAV_ADDRESSBOOKS",
+          "description": "Comma-separated address books this server may touch, by path or final path segment. Default: all of them.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "CARDDAV_MAX_CONTACTS",
+          "description": "Contacts a listing returns by default, 1 to 500 (default: 100)",
+          "isRequired": false,
+          "format": "number"
+        },
+        {
+          "name": "CARDDAV_READ_ONLY",
+          "description": "Set to true to register only the read tools (default: false)",
+          "isRequired": false,
+          "format": "boolean"
+        },
+        {
+          "name": "CARDDAV_INSECURE_TLS",
+          "description": "Set to true to accept a self-signed certificate on the configured host only (default: false)",
+          "isRequired": false,
+          "format": "boolean"
+        },
+        {
+          "name": "CARDDAV_ALLOW_PLAINTEXT",
+          "description": "Set to true to allow a plain http:// URL to a host that is not loopback, which sends the credentials and every contact unencrypted (default: false)",
+          "isRequired": false,
+          "format": "boolean"
+        },
+        {
+          "name": "CARDDAV_ALLOW_TOOLS",
+          "description": "Comma-separated tool names or list_* prefixes to register; 'essential' selects a curated preset (default: all tools)",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "CARDDAV_DENY_TOOLS",
+          "description": "Comma-separated tool names or list_* prefixes to remove from whatever the allow list left",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "ELICITATION",
+          "description": "Deliberately unprefixed, and reaches every MCP server in the environment. Set to false to make guarded tools use the two-call token instead of a dialog (default: true)",
+          "isRequired": false,
+          "format": "boolean"
+        }
+      ]
+    }
+  ]
+}
