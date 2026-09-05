@@ -6,6 +6,7 @@ import {
   membersOf,
   memberUid,
   photoInfo,
+  propertyValue,
   readDate,
   readList,
   readStructured,
@@ -122,7 +123,7 @@ function shapeOrg(card: ICAL.Component): {
 /** The seven components of `ADR`, per occurrence. */
 function shapeAddresses(card: ICAL.Component): Record<string, unknown>[] {
   return card.getAllProperties('adr').map((prop) => {
-    const raw = prop.getFirstValue();
+    const raw = propertyValue(prop);
     const parts = Array.isArray(raw) ? raw : [raw];
     const at = (index: number): string | undefined => {
       const part = parts[index];

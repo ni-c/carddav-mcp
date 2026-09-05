@@ -71,7 +71,7 @@ export function createServer(config: Config): McpServer {
   });
 
   const api = new CardDavApi(config);
-  const discovery = new Discovery(api, config.addressBooks);
+  const discovery = new Discovery(api, config);
   const context: ToolContext = { api, discovery, config };
 
   const confirmations = new ConfirmationStore();

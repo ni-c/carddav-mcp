@@ -135,10 +135,22 @@ export function newVCard(uid: string, version: VCardVersion): ICAL.Component {
  * case there is nothing here that a wrong value could mislead. Clients use it
  * to resolve a two-sided edit, which is reason enough to keep it current.
  *
- * The format differs by version: 4.0 wants a basic-format timestamp
- * (`20260906T101500Z`), 3.0 an extended-format one
- * (`2026-09-06T10:15:00Z`). Writing the 4.0 spelling into a 3.0 card is the
- * kind of thing that parses everywhere and then fails one validator.
+ * **The value handed in has to be spelled per version, and getting it wrong
+ * fails in two different ways — neither of them an error.** ical.js decorates
+ * the value on the way in and re-serialises it canonically on the way out, so
+ * what reaches the wire is not the string given here; what the string decides
+ * is whether the decoration works. Measured against the library:
+ *
+ * | card | given | serialised | read back |
+ * |---|---|---|---|
+ * | 3.0 | `2026-09-05T23:05:16Z` | `20260905T230516Z` | fine |
+ * | 3.0 | `20260905T230516Z` | **`20260905T23016Z`** | fine |
+ * | 4.0 | `20260905T230516Z` | `20260905T230516Z` | fine |
+ * | 4.0 | `2026-09-05T23:05:16Z` | `20260905T230516Z` | **throws** |
+ *
+ * The 3.0 row in bold is the dangerous one: a *silently corrupted* timestamp,
+ * a digit short, written to the server and noticed by nobody. So 3.0 is fed
+ * the extended form and 4.0 the basic one, and this branch is not cosmetic.
  */
 export function touch(card: ICAL.Component): void {
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -190,12 +202,46 @@ export function isPreferred(prop: ICAL.Property): boolean {
   return pref !== undefined && pref !== null && String(pref) === '1';
 }
 
+/**
+ * A property's first value, falling back to the text the card actually holds.
+ *
+ * **Every read in this file goes through here, and that is not defensiveness
+ * for its own sake.** ical.js decorates a typed value on access — a `BDAY` into
+ * a date, a `REV` into a timestamp — and throws when the text does not fit the
+ * grammar. Two situations make that a real failure rather than a theoretical
+ * one:
+ *
+ * - **A card from the wild.** `BDAY:not-a-date` is legal text in a file some
+ *   client wrote years ago, and an exception there does not lose one field, it
+ *   takes `get_contact` down for the whole card.
+ * - **A card this process just built.** For a vCard 4.0 card, ical.js types
+ *   `REV` as a `timestamp` and *serialises* `20260905T225812Z` correctly —
+ *   which is the only spelling the 4.0 grammar accepts — but reading the same
+ *   value back off the in-memory object routes through the iCalendar
+ *   date-time parser and throws. Round-tripping the card through its own wire
+ *   form fixes it, which is the tell that this is a decoration bug rather than
+ *   a bad value. `create_contact` against a 4.0 address book hit exactly this.
+ *
+ * The fallback is the raw jCal slot, which is the unparsed text — the honest
+ * answer to "what does the card say" when the grammar cannot tell us what it
+ * means.
+ */
+export function propertyValue(prop: ICAL.Property): unknown {
+  try {
+    return prop.getFirstValue();
+  } catch {
+    return (prop.jCal as unknown[])[3];
+  }
+}
+
 /** Reads a text property, or undefined when it is absent or empty. */
 export function readText(
   card: ICAL.Component,
   name: string
 ): string | undefined {
-  const value = card.getFirstPropertyValue(name);
+  const prop = card.getFirstProperty(name);
+  if (prop === null || prop === undefined) return undefined;
+  const value = propertyValue(prop);
   if (value === null || value === undefined) return undefined;
   const text = String(value).trim();
   return text.length > 0 ? text : undefined;
@@ -205,7 +251,7 @@ export function readText(
 export function readList(card: ICAL.Component, name: string): string[] {
   return card
     .getAllProperties(name)
-    .map((prop) => String(prop.getFirstValue() ?? '').trim())
+    .map((prop) => String(propertyValue(prop) ?? '').trim())
     .filter((value) => value.length > 0);
 }
 
@@ -222,7 +268,7 @@ export function readTyped(card: ICAL.Component, name: string): TypedValue[] {
   return card
     .getAllProperties(name)
     .map((prop) => ({
-      value: String(prop.getFirstValue() ?? '').trim(),
+      value: String(propertyValue(prop) ?? '').trim(),
       types: typesOf(prop),
       preferred: isPreferred(prop),
     }))
@@ -245,7 +291,7 @@ export function readStructured(
 ): string[] {
   const prop = card.getFirstProperty(name);
   if (prop === null || prop === undefined) return [];
-  const raw = prop.getFirstValue();
+  const raw = propertyValue(prop);
   const parts = Array.isArray(raw) ? raw : [raw];
   const out: string[] = [];
   for (let index = 0; index < length; index += 1) {
@@ -292,7 +338,7 @@ export function readDate(
 ): PartialDate | undefined {
   const prop = card.getFirstProperty(name);
   if (prop === null || prop === undefined) return undefined;
-  const value = prop.getFirstValue();
+  const value = propertyValue(prop);
   if (value === null || value === undefined) return undefined;
   const raw = String(value).trim();
   if (raw.length === 0) return undefined;
@@ -398,7 +444,7 @@ export interface PhotoInfo {
 export function photoInfo(card: ICAL.Component): PhotoInfo | undefined {
   const prop = card.getFirstProperty('photo');
   if (prop === null || prop === undefined) return undefined;
-  const raw = String(prop.getFirstValue() ?? '');
+  const raw = String(propertyValue(prop) ?? '');
   if (raw.length === 0) return undefined;
 
   const dataUri = /^data:([^;,]*)(;base64)?,/i.exec(raw);
@@ -447,7 +493,7 @@ export function photoBytes(
   if (info === undefined || info.storage !== 'inline') return undefined;
   const prop = card.getFirstProperty('photo');
   if (prop === null || prop === undefined) return undefined;
-  const raw = String(prop.getFirstValue() ?? '');
+  const raw = String(propertyValue(prop) ?? '');
   const payload = /^data:[^,]*,/i.test(raw)
     ? raw.slice(raw.indexOf(',') + 1)
     : raw;
@@ -549,12 +595,22 @@ export function writeTyped(
   }
 }
 
-/** Replaces a structured property (`N`, `ADR`) with the given components. */
+/**
+ * Replaces a structured property with the given components.
+ *
+ * ical.js draws a distinction here that is invisible from the outside and
+ * throws when it is got wrong. `N` and `ADR` are declared
+ * `structuredValue: ';'` **and** `multiValue: ','`, so each component may
+ * itself be a list and the value has to be nested one level. `ORG` is declared
+ * structured only, and handing it the nested form fails with
+ * `org: does not not support mulitValue` — the library's own typo, and the
+ * only warning anyone gets.
+ */
 export function writeStructured(
   card: ICAL.Component,
   name: string,
   parts: readonly string[] | null | undefined,
-  options: { type?: string } = {}
+  options: { type?: string; nested?: boolean } = {}
 ): void {
   if (parts === undefined) return;
   card.removeAllProperties(name);
@@ -563,7 +619,35 @@ export function writeStructured(
   if (options.type !== undefined && options.type.trim().length > 0) {
     prop.setParameter('type', options.type.trim().toUpperCase());
   }
-  prop.setValues([parts.map((part) => foldNewlines(part))] as never);
+  const folded = parts.map((part) => foldNewlines(part));
+  if (options.nested === false) {
+    // A structured-only property holds one value that happens to be an array,
+    // so it is `setValue`. `setValues` is the multi-value setter and refuses
+    // outright here — which is the failure the docblock above describes.
+    prop.setValue(folded as never);
+  } else {
+    prop.setValues([folded] as never);
+  }
+  card.addProperty(prop);
+}
+
+/**
+ * Replaces a comma-separated multi-value property, `CATEGORIES` being the one.
+ *
+ * Joining the list into one string and letting ical.js escape it produces a
+ * single category called `one\,two`, which is a different thing from two
+ * categories and reads correctly in no client.
+ */
+export function writeMultiValue(
+  card: ICAL.Component,
+  name: string,
+  values: readonly string[] | null | undefined
+): void {
+  if (values === undefined) return;
+  card.removeAllProperties(name);
+  if (values === null || values.length === 0) return;
+  const prop = new ICAL.Property(name, card);
+  prop.setValues(values.map((value) => foldNewlines(value)) as never);
   card.addProperty(prop);
 }
 

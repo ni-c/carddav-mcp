@@ -4,6 +4,11 @@ import {
   normalisePath,
   type AddressBookEntry,
 } from './books.js';
+import {
+  missingConfigKeys,
+  missingConfigMessage,
+  type Config,
+} from './config.js';
 import { AllowlistError } from './errors.js';
 import {
   hrefsOf,
@@ -68,15 +73,33 @@ export interface Principal {
 
 export class Discovery {
   private readonly api: CardDavApi;
+  private readonly config: Config;
   private readonly allowlist: readonly string[];
   private principalPromise: Promise<Principal> | undefined;
   private books: { at: number; registry: AddressBookRegistry } | undefined;
   private inFlight: Promise<AddressBookRegistry> | undefined;
   private warnedUnmatched = false;
 
-  constructor(api: CardDavApi, allowlist: readonly string[]) {
+  constructor(api: CardDavApi, config: Config) {
     this.api = api;
-    this.allowlist = allowlist;
+    this.config = config;
+    this.allowlist = config.addressBooks;
+  }
+
+  /**
+   * Refuses to walk anywhere without a configuration.
+   *
+   * `api.send` already refuses, but {@link probe} deliberately swallows a
+   * failure so that a wrong guess about where the endpoint is does not end the
+   * walk — and that swallowed the setup message too. Discovery then carried on
+   * with an empty base URL and died in `new URL('/.well-known/carddav', '')`
+   * with **`Invalid URL`**, on precisely the path a registry or a sandbox
+   * inspector takes. The server is required to start without credentials; the
+   * first call is required to say what is missing.
+   */
+  private assertConfigured(): void {
+    const missing = missingConfigKeys(this.config);
+    if (missing.length > 0) throw new Error(missingConfigMessage(missing));
   }
 
   /**
@@ -144,6 +167,7 @@ export class Discovery {
   }
 
   private async discoverPrincipal(): Promise<Principal> {
+    this.assertConfigured();
     const notes: string[] = [];
     const root = `${this.api.url}/`;
 
