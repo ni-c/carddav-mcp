@@ -1,0 +1,78 @@
+{
+  "name": "@ni-c/carddav-mcp",
+  "version": "0.1.0",
+  "mcpName": "io.github.ni-c/carddav-mcp",
+  "description": "Model Context Protocol (MCP) server for CardDAV address books: contacts, groups and photos",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "carddav",
+    "contacts",
+    "address-book",
+    "vcard",
+    "webdav",
+    "groups"
+  ],
+  "license": "MIT",
+  "author": "Willi Thiel",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ni-c/carddav-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ni-c/carddav-mcp/issues"
+  },
+  "homepage": "https://carddav-mcp.ni-c.de",
+  "funding": "https://github.com/sponsors/ni-c",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "carddav-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "prepublishOnly": "npm run lint && npm run typecheck && npm run build && npm test",
+    "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "tsc",
+    "typecheck": "tsc --project tsconfig.test.json",
+    "watch": "tsc --watch",
+    "lint": "oxlint --deny-warnings && prettier --check .",
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "assets": "svg-asset-set",
+    "assets:check": "svg-asset-set --check",
+    "docs:tools": "node scripts/gen-tools-doc.mjs",
+    "docs:tools:check": "node scripts/gen-tools-doc.mjs --check"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "fast-xml-parser": "^5.11.1",
+    "ical.js": "^2.2.1",
+    "mcp-approval": "^0.8.0",
+    "mcp-internal-hosts": "^0.2.1",
+    "mcp-tool-allowlist": "^0.2.1",
+    "undici": "^8.10.2",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@types/node": "^26.4.1",
+    "@vitest/coverage-v8": "5.0.0",
+    "mcp-integration-harness": "^0.4.0",
+    "oxlint": "^1.81.0",
+    "prettier": "^3.9.6",
+    "svg-asset-set": "https://github.com/ni-c/svg-asset-set/releases/download/v0.2.0/svg-asset-set-0.2.0.tgz",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  }
+}

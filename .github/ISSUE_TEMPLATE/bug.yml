@@ -1,0 +1,41 @@
+name: Bug report
+description: Something behaves wrongly or breaks
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: 'caldav-mcp version'
+      placeholder: '0.2.3 (npm version, docker tag or commit)'
+    validations:
+      required: true
+  - type: input
+    id: target
+    attributes:
+      label: CalDAV server and version
+      description: >-
+        Radicale 3.8, Baikal 0.10, Nextcloud 31, iCloud, Fastmail, mailbox.org …
+        Which server it is matters more here than most: they disagree about
+        namespace prefixes, href forms and error preconditions.
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: MCP client
+      placeholder: 'Claude Code, Claude Desktop, Codex, MCP Inspector, …'
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you called, what you expected, what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: >-
+        Tool result or stderr. Please redact tokens, private keys, internal hostnames
+        and IPs — this issue is public.
+      render: text

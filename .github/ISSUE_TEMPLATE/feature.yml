@@ -1,0 +1,28 @@
+name: Feature request
+description: A tool or capability the server should have
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The situation or workflow, not yet the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What should the server be able to do?
+    validations:
+      required: true
+  - type: input
+    id: endpoint
+    attributes:
+      label: The RFC section or report it would need (if you know it)
+      description: >-
+        A pointer into RFC 4791, RFC 5545 or RFC 6638 — or the name of the
+        REPORT — makes this much faster.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds you considered
