@@ -1,0 +1,46 @@
+# Two CardDAV servers, because one is not enough to catch what this server has
+# to survive. Radicale is the main stage: small, fast, and the implementation
+# most self-hosters actually run. Baikal is sabre/dav, which is the same family
+# as the hosted services people connect to — different XML prefixes, different
+# href spelling, its own collation rules, and `&#13;` for the line endings of
+# the card itself — which made every sabre card unparseable until the decoder
+# learned to tell that node apart from a value.
+#
+# Every published port binds 127.0.0.1 explicitly. This machine runs MCP servers
+# against real infrastructure; a suite that called every delete it has must not
+# be reachable from the network while it does.
+services:
+  radicale:
+    image: ${RADICALE_IMAGE:-tomsquest/docker-radicale:3.8.0.0}
+    ports: ['127.0.0.1:5232:5232']
+    volumes:
+      - ./radicale/config:/etc/radicale/config:ro
+      - ./radicale/users:/etc/radicale/users:ro
+    # State in memory only: `down -v` is not enough on its own, because the
+    # image declares a volume for /data. A tmpfs makes every run start empty
+    # whatever the caller remembered to pass.
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1:5232/']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  baikal:
+    image: ${BAIKAL_IMAGE:-ckulka/baikal:0.10.1-php8.2}
+    ports: ['127.0.0.1:8088:80']
+    tmpfs:
+      - /var/www/baikal/config
+      - /var/www/baikal/Specific
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'php',
+          '-r',
+          'exit(@file_get_contents("http://127.0.0.1/") === false ? 1 : 0);',
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 45

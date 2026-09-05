@@ -298,9 +298,10 @@ export class AddressBookRegistry implements AddressBookLookup {
    * Whether a collection accepts a vCard version.
    *
    * An empty `supportedTypes` means the server declared nothing, which RFC 6352
-   * reads as `text/vcard; version=3.0`. Answering `false` for 3.0 there would
-   * refuse writes on every Radicale collection, none of which advertises the
-   * property at all.
+   * §6.2.2 reads as `text/vcard; version=3.0` — not as "nothing is accepted".
+   * Both backends in the integration suite do declare the property (Radicale
+   * 3.8 says 3.0, sabre/dav says 3.0 and 4.0), so this branch covers the
+   * servers that do not rather than either of them.
    */
   accepts(book: AddressBookEntry, version: string): boolean {
     if (book.supportedTypes.length === 0) return version === '3.0';

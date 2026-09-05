@@ -5,6 +5,7 @@ import {
   addressbookQueryBody,
   addressbookSearchBody,
   assertNoDoctype,
+  decodeAddressData,
   decodeXmlText,
   escapeXmlText,
   hrefsOf,
@@ -75,6 +76,38 @@ describe('decodeXmlText', () => {
 
   it('decodes a tab reference, which is an ordinary character here', () => {
     expect(decodeXmlText('a&#9;b')).toBe('a\tb');
+  });
+});
+
+describe('decodeAddressData', () => {
+  it('decodes the line endings sabre/dav writes as entities', () => {
+    // Found by the integration suite on its first run against Baikal: sabre
+    // encodes the vCard's own CRLFs as `&#13;`, so under the strict rule every
+    // card it returned came back as `BEGIN:VCARD&#13;` and did not parse. The
+    // listing was empty and nothing raised an error.
+    const sabre = 'BEGIN:VCARD&#13;\nVERSION:3.0&#13;\nFN:Ada&#13;\nEND:VCARD';
+    expect(decodeAddressData(sabre)).toBe(
+      'BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Ada\r\nEND:VCARD'
+    );
+  });
+
+  it('still refuses every other control character', () => {
+    // The relaxation is exactly two code points wide. A NUL or an escape
+    // reference stays literal here as it does everywhere else.
+    expect(decodeAddressData('a&#0;b')).toBe('a&#0;b');
+    expect(decodeAddressData('a&#27;b')).toBe('a&#27;b');
+    expect(decodeAddressData('a&#x7f;b')).toBe('a&#x7f;b');
+    expect(decodeAddressData('a&#xD800;b')).toBe('a&#xD800;b');
+  });
+
+  it('decodes the named entities like its stricter sibling', () => {
+    expect(decodeAddressData('FN:Tom &amp; Jerry')).toBe('FN:Tom & Jerry');
+  });
+
+  it('is not what the other nodes use', () => {
+    // The guard still buys something: a `displayname` is one line to this
+    // server, and a smuggled CR there would end it.
+    expect(decodeXmlText('Work&#13;&#10;evil')).toBe('Work&#13;&#10;evil');
   });
 });
 

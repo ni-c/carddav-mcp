@@ -93,17 +93,47 @@ export class XmlValueError extends Error {
  * with `&amp;`, `&lt;`, `&#13;` and friends still in it. They have to be
  * decoded somewhere, and this is the somewhere.
  *
- * The control-character guard is the load-bearing part and it is specific to
- * this protocol: `address-data` carries a vCard, where CRLF is what separates
- * one property from the next. Decoding `&#13;&#10;` inside a `NOTE` would
- * therefore *create structure* — `NOTE:harmless&#13;&#10;EMAIL:attacker@evil.example`
- * would become two properties, one of which nobody wrote, and the second one is
- * an address the model would then read as this person's. A numeric reference to
- * a C0/C1 character, a surrogate or an out-of-range code point is emitted as
+ * The control-character guard is the load-bearing part. Every value this
+ * function is used on — a `displayname`, an href, a DAV error message — is one
+ * this server treats as a single line, so a decoded CR or LF would end it and
+ * start something the server never sent. A numeric reference to a C0/C1
+ * character, a surrogate or an out-of-range code point is therefore emitted as
  * its literal source text instead of as a character: visible, inert, and
  * obviously wrong to a reader rather than silently effective.
+ *
+ * The one node this is *not* used on is `address-data`, whose content is a
+ * document rather than a value — see {@link decodeAddressData}.
  */
 export function decodeXmlText(value: string): string {
+  return decode(value, false);
+}
+
+/**
+ * The same, for the one node whose content **is** a document.
+ *
+ * `address-data` is different from every other text node here, and the
+ * difference is not cosmetic: sabre/dav encodes the vCard's own line endings as
+ * `&#13;`, where Radicale writes them raw. With the strict rule above, every
+ * card sabre returns comes back as `BEGIN:VCARD&#13;` and fails to parse — the
+ * integration suite found this on its first run against Baikal, as three
+ * unreadable cards and an empty listing.
+ *
+ * So CR, LF and tab are decoded here. **That gives an attacker nothing**, which
+ * is the whole argument for the exception rather than a tolerance of it: the
+ * guard exists to stop a decoded control character *creating structure*, and in
+ * this node a hostile server can create the same structure by sending a raw
+ * CRLF instead, which no amount of entity handling would catch. What the guard
+ * still buys is the other nodes — a `displayname` or a DAV error message, where
+ * this server treats the value as one line and a smuggled CR would end it.
+ *
+ * Everything else stays refused here too: other C0 characters, C1, surrogates
+ * and out-of-range references are emitted as their literal source text.
+ */
+export function decodeAddressData(value: string): string {
+  return decode(value, true);
+}
+
+function decode(value: string, allowLineBreaks: boolean): string {
   return value.replace(
     /&(?:(amp|lt|gt|quot|apos)|#(\d+)|#[xX]([0-9a-fA-F]+));/g,
     (
@@ -125,6 +155,9 @@ export function decodeXmlText(value: string): string {
       if (code > 0x10ffff) return source;
       // Surrogates are not characters; a reference to one is malformed.
       if (code >= 0xd800 && code <= 0xdfff) return source;
+      if (allowLineBreaks && (code === 0x0a || code === 0x0d)) {
+        return String.fromCodePoint(code);
+      }
       // C0 and C1, tab excepted. This is the injection guard described above.
       if (code < 0x20 && code !== 0x09) return source;
       if (code >= 0x7f && code <= 0x9f) return source;
@@ -245,13 +278,12 @@ export function parseMultiStatus(xml: string, what: string): DavResponse[] {
     // into the formatted name. The sister server shipped exactly that bug and
     // an audit round found it.
     //
-    // Decoding it here rather than at the reader is what keeps the guard in
-    // `decodeXmlText` on the path it was written for: that function's whole
-    // reason for refusing a numeric reference to a control character is this
-    // document, where a decoded `&#13;&#10;` would end one property and start
-    // another that nobody wrote.
+    // Through `decodeAddressData` rather than `decodeXmlText`: this is the one
+    // node whose content is a document in its own right, and sabre/dav encodes
+    // that document's line endings as `&#13;`. See the docblock there for why
+    // relaxing the guard for exactly this node costs nothing.
     if (typeof props['address-data'] === 'string') {
-      props['address-data'] = decodeXmlText(props['address-data']);
+      props['address-data'] = decodeAddressData(props['address-data']);
     }
     return {
       href,
