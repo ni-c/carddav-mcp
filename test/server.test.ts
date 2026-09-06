@@ -655,6 +655,21 @@ describe('list_changes', () => {
 });
 
 describe('the server introduces itself', () => {
+  it('warns about untrusted content where a model reads it first', async () => {
+    // The untrusted marker on a result is read after the fact. `instructions`
+    // is the only channel that arrives *before* the first tool call.
+    //
+    // The assertion is on the claim, not on the word "untrusted": a sibling
+    // that only sends mail warns correctly without ever using it. `\s+` rather
+    // than a literal space because the 80-column wrap puts a newline inside
+    // this sentence in a third of the family — sixteen repositories went green
+    // on a literal space and two CI runs went red.
+    await open();
+    const instructions = session.client.getInstructions();
+    expect(instructions).toBeTruthy();
+    expect(instructions).toMatch(/never\s+(?:follow|as)\s+instructions/i);
+  });
+
   it('sends all six Implementation fields, not just a name tag', async () => {
     // Every client that shows a server to a person reads these. All four of the
     // optional ones were already written down in `server.json` for the
