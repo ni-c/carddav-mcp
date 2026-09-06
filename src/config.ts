@@ -1,6 +1,6 @@
 import { internalHostKind } from 'mcp-internal-hosts';
 
-import { redactUrlCredentials } from './redact.js';
+import { redactUnparsedUrl } from './redact.js';
 
 /** Default number of contacts a listing returns when the caller does not say. */
 export const DEFAULT_MAX_ENTRIES = 100;
@@ -257,8 +257,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     // URL parses, so a value that does not parse at all but still carries
     // credentials — "https://admin:s3cret@host:99999", an out-of-range port —
     // would otherwise print the password into the MCP client's log file.
+    // `redactUnparsedUrl` rather than the precise rewrite, because the precise
+    // one stops at the first `/` and a password containing a `/` is exactly
+    // what lands here.
     console.error(
-      `carddav-mcp: CARDDAV_URL is not a valid URL: ${redactUrlCredentials(url)}`
+      `carddav-mcp: CARDDAV_URL is not a valid URL: ${redactUnparsedUrl(url)}`
     );
     process.exit(1);
   }

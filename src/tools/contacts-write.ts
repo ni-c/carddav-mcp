@@ -38,6 +38,7 @@ import {
   deleteCard,
   hasAnyField,
   replaceCard,
+  textDigest,
   type ContactFields,
 } from '../write.js';
 import { CREATE, DELETE, MOVE, REPLACE } from './annotations.js';
@@ -239,7 +240,7 @@ export function registerContactWriteTools(
               loaded.entity.resourceName,
               args.raw_vcard === undefined
                 ? changeDigest(fields)
-                : `raw:${args.raw_vcard.length}`,
+                : `raw:${textDigest(args.raw_vcard)}`,
             ]),
             token: args.confirm_token,
             toolName: 'update_contact',

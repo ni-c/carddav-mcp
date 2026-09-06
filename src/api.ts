@@ -4,7 +4,7 @@ import {
   type RequestInit as UndiciRequestInit,
 } from 'undici';
 
-import { quoted } from './analyze.js';
+import { quoted, stripInvisible } from './analyze.js';
 import {
   missingConfigKeys,
   missingConfigMessage,
@@ -53,6 +53,16 @@ const MAX_ROUNDTRIP_BYTES = 8 * 1024 * 1024;
  */
 const MAX_STATUS_BODY_BYTES = 1 * 1024 * 1024;
 
+/**
+ * Ceilings on one `DAV:` / `Allow` token and on how many are kept.
+ *
+ * RFC 4918 lets a compliance class be a coded URL rather than a bare word, so
+ * these are not as tight as the real values (`1`, `addressbook`, `REPORT`)
+ * would allow.
+ */
+const MAX_TOKEN_CHARS = 128;
+const MAX_TOKENS = 40;
+
 export class CardDavApiError extends Error {
   constructor(
     public readonly status: number,
@@ -73,6 +83,20 @@ export class CardDavApiError extends Error {
 export interface Resource {
   vcf: string;
   etag: string | undefined;
+}
+
+/**
+ * What `/.well-known/carddav` said, in the three ways it can say it.
+ *
+ * `{}` covers both "no such route" and "an answer that named nothing" — a
+ * caller has the same next step either way. `refusedOrigin` is the case worth
+ * keeping apart: the route worked and pointed somewhere this server will not
+ * follow, which is an operator's misconfigured `CARDDAV_URL` rather than a
+ * server that lacks the route.
+ */
+export interface WellKnownProbe {
+  url?: string;
+  refusedOrigin?: string;
 }
 
 interface SendOptions {
@@ -267,11 +291,22 @@ export class CardDavApi {
       await readBoundedBody(response, url, MAX_STATUS_BODY_BYTES)
     ).toString('utf8');
     if (!ok) throw await apiError(status, body, 'OPTIONS', url);
+    // A response header is a string the far end chose, and `get_server_info`
+    // hands these two straight to the model in this server's own voice — the
+    // one result in the file that is deliberately *not* marked untrusted, on
+    // the grounds that everything in it is a protocol token. That is only true
+    // if it is enforced here. Lowercasing already defangs `SYSTEM:`; it does
+    // nothing about a sentence, an invisible character, or a header long
+    // enough to fill the result budget on its own. A real compliance class is
+    // a token or a coded URL, and no server sends forty of them.
     const split = (value: string | null): string[] =>
       (value ?? '')
         .split(',')
-        .map((entry) => entry.trim().toLowerCase())
-        .filter((entry) => entry.length > 0);
+        .map((entry) =>
+          stripInvisible(entry).trim().toLowerCase().slice(0, MAX_TOKEN_CHARS)
+        )
+        .filter((entry) => entry.length > 0)
+        .slice(0, MAX_TOKENS);
     return {
       dav: split(headers.get('dav')),
       allow: split(headers.get('allow')),
@@ -422,7 +457,7 @@ export class CardDavApi {
    * without depending on anyone remembering. `discovery.ts` is the only caller,
    * and a test asserts every other verb throws on a 3xx.
    */
-  async probeWellKnown(): Promise<string | undefined> {
+  async probeWellKnown(): Promise<WellKnownProbe> {
     const url = new URL('/.well-known/carddav', this.baseUrl).toString();
     let result;
     try {
@@ -434,14 +469,32 @@ export class CardDavApi {
     } catch {
       // A server without the well-known route is the normal case, not a fault:
       // Baikal only ships it when the vhost is configured for it.
-      return undefined;
+      return {};
     }
     const location = result.headers.get('location');
     if (result.status >= 300 && result.status < 400 && location) {
-      return this.resolveHref(location, url);
+      // RFC 6764 §6 lets this route redirect to a *different* host — it is how
+      // `example.net/.well-known/carddav` sends a client to `dav.example.net`,
+      // which is the ordinary hosted-provider bootstrap. Refusing to follow it
+      // is right; throwing here is not. `resolveHref` throws, and this used to
+      // sit outside the `try`, so one such redirect killed discovery before
+      // steps 3 and 4 ran — and the failure was memoised, so every tool call
+      // for the life of the process returned it. The refused origin is worth
+      // naming, though: it is exactly what `CARDDAV_URL` should have been.
+      try {
+        return { url: this.resolveHref(location, url) };
+      } catch {
+        let refusedOrigin: string | undefined;
+        try {
+          refusedOrigin = new URL(location, url).origin;
+        } catch {
+          refusedOrigin = undefined;
+        }
+        return refusedOrigin === undefined ? {} : { refusedOrigin };
+      }
     }
-    if (result.status === 207) return url;
-    return undefined;
+    if (result.status === 207) return { url };
+    return {};
   }
 
   /**

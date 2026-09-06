@@ -26,3 +26,33 @@ const URL_USERINFO = /^([a-z][a-z0-9+.-]*:\/\/)[^/?#]*@/i;
 export function redactUrlCredentials(url: string): string {
   return url.replace(URL_USERINFO, '$1***@');
 }
+
+/** Just the scheme of a value, `''` when it does not start with one. */
+const URL_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
+
+/**
+ * The same job for a value that did **not** parse as a URL.
+ *
+ * The narrow rule above cannot cross a `/`, which is correct for a URL that
+ * parses and wrong for the one caller that matters. A password containing a `/`
+ * is *precisely* a value `new URL` rejects — `https://user:pa/ss@dav.example.net`
+ * parses its authority as `user:pa`, reads `pa` as a port and throws — so the
+ * one branch that echoes the operator's raw string is the one branch where the
+ * narrow rule reliably finds no `@` to redact. It printed the password.
+ *
+ * So: try the precise rewrite, and where it changed nothing but the value
+ * carries an `@` anyway, give up on showing it. A length is enough to tell a
+ * typo from a paste, and the scheme is the part a wrong value is usually wrong
+ * about. Anything from a `?` or `#` onwards goes too — a token in a query
+ * string is a credential the userinfo rule was never looking for.
+ */
+export function redactUnparsedUrl(url: string): string {
+  const narrow = redactUrlCredentials(url);
+  if (narrow !== url) return narrow;
+  const scheme = URL_SCHEME.exec(url)?.[0] ?? '';
+  if (url.includes('@')) {
+    return `${scheme}<${url.length - scheme.length} characters, redacted>`;
+  }
+  const cut = url.search(/[?#]/);
+  return cut === -1 ? url : `${url.slice(0, cut)}<query redacted>`;
+}

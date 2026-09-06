@@ -8,6 +8,7 @@ import {
   missingConfigMessage,
   parseElicitation,
 } from '../src/config.js';
+import { redactUnparsedUrl } from '../src/redact.js';
 
 /** A minimal environment that loads without exiting. */
 function env(
@@ -120,6 +121,40 @@ describe('loadConfig', () => {
     expect(exited).toBe(true);
     expect(errors.join('\n')).toContain('***@');
     expect(errors.join('\n')).not.toContain('s3cret');
+  });
+
+  it.each([
+    ['https://user:pass@dav.example.net/x', 'https://***@dav.example.net/x'],
+    [
+      'https://admin:pa/ss@dav.example.net',
+      'https://<27 characters, redacted>',
+    ],
+    ['not-a-url-at-all', 'not-a-url-at-all'],
+    [
+      'https://dav.example.net/x?token=abc',
+      'https://dav.example.net/x<query redacted>',
+    ],
+  ])('redactUnparsedUrl(%s)', (input, expected) => {
+    // The narrow rewrite where it applies, a length where it does not and an
+    // `@` says credentials are in there somewhere, the value untouched where
+    // there is nothing to hide, and the query gone either way — a token in a
+    // query string is a credential the userinfo rule was never looking for.
+    expect(redactUnparsedUrl(input)).toBe(expected);
+  });
+
+  it('redacts a password containing a slash, which is the case that lands here', () => {
+    // The precise rewrite matches userinfo only up to the first `/`, which is
+    // correct for a URL that parses. But a password with a `/` in it is
+    // *precisely* a URL that does not parse — `new URL` reads the authority as
+    // `admin:pa`, takes `pa` for a port and throws — so the one branch that
+    // echoes the operator's raw string was the one branch where the narrow
+    // rule reliably found no `@`. It printed the password.
+    const { exited, errors } = catchExit(() =>
+      loadConfig(env({ CARDDAV_URL: 'https://admin:pa/ss@dav.example.net' }))
+    );
+    expect(exited).toBe(true);
+    expect(errors.join('\n')).not.toContain('pa/ss');
+    expect(errors.join('\n')).toContain('redacted');
   });
 
   it('refuses a query string or a fragment on the root URL', () => {

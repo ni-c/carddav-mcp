@@ -72,6 +72,14 @@ export interface FakeOptions {
    * decided by document order.
    */
   duplicateReadOnly?: boolean;
+  /**
+   * The `DAV:` response header, verbatim.
+   *
+   * A response header is a string the far end chose, and `get_server_info`
+   * reports this one in the server's own voice rather than as untrusted
+   * content — so what a hostile value does to it is a test, not a hypothetical.
+   */
+  dav?: string;
 }
 
 export class FakeCardDav {
@@ -197,7 +205,7 @@ export class FakeCardDav {
 
     if (method === 'OPTIONS') {
       return this.reply(200, '', {
-        dav: '1, 2, 3, addressbook',
+        dav: this.options.dav ?? '1, 2, 3, addressbook',
         allow: 'GET, PUT, DELETE, PROPFIND, REPORT, OPTIONS',
       });
     }

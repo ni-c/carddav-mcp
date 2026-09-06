@@ -96,6 +96,20 @@ describe('budget', () => {
     expect((result.notes as string[])[0]).toBe('something earlier');
   });
 
+  it('counts its own note against the ceiling', () => {
+    // The note used to be appended *after* the size was accepted, so an answer
+    // that fitted by a few characters came back over the ceiling by exactly
+    // the length of the sentence saying it was under it. A small ceiling is
+    // what makes that visible: the note is a fixed ~100 characters, so at 200
+    // it is half the budget rather than a rounding error. These sixteen
+    // entries halve to four at 183 characters — accepted, and then 275 once
+    // the note is on it.
+    const items = Array.from({ length: 16 }, () => 'x'.repeat(40));
+    const result = budget({ items }, 'ask for fewer', 200);
+    expect(JSON.stringify(result.notes)).toContain('ask for fewer');
+    expect(JSON.stringify(result).length).toBeLessThanOrEqual(200);
+  });
+
   it('refuses rather than emitting a shape the tool never declared', () => {
     // A refusal, so it becomes an error result. An envelope of another shape
     // would be rejected by the SDK against the schema the tool declares.
@@ -465,6 +479,40 @@ describe('discovery', () => {
     await expect(discovery.registry()).rejects.toThrow(/full path/);
   });
 
+  it('steps over a cross-origin well-known redirect instead of dying on it', async () => {
+    // RFC 6764 §6 defines this route *as* a redirect and explicitly allows it
+    // to cross to another host — it is how a hosted provider sends a client
+    // from the domain somebody typed to the one that serves DAV. Refusing to
+    // follow it is right. Throwing is not: `resolveHref` sat outside the try,
+    // so one such redirect ended discovery before the later steps ran, and the
+    // principal promise is memoised, so every tool call for the life of the
+    // process returned the same error about another host.
+    vi.stubGlobal('fetch', (url: string) => {
+      const target = new URL(String(url));
+      if (target.pathname === '/.well-known/carddav') {
+        return Promise.resolve(
+          new Response(null, {
+            status: 301,
+            headers: { location: 'https://elsewhere.example/dav/' },
+          })
+        );
+      }
+      return Promise.resolve(
+        new Response(
+          '<?xml version="1.0"?><multistatus xmlns="DAV:"><response><href>/</href><propstat><prop/><status>HTTP/1.1 404 Not Found</status></propstat></response></multistatus>',
+          { status: 207, headers: { 'content-type': 'application/xml' } }
+        )
+      );
+    });
+    const discovery = new Discovery(new CardDavApi(testConfig()), testConfig());
+    const principal = await discovery.principal();
+    expect(principal.homes).toEqual([`${ORIGIN}/`]);
+    // Named, because the refused origin is exactly what CARDDAV_URL should
+    // have been set to. Silence here would leave an operator with a working
+    // server pointed at the wrong host and no hint why it is empty.
+    expect(JSON.stringify(principal.notes)).toContain('elsewhere.example');
+  });
+
   it('caches the registry and refetches when forced', async () => {
     const fake = new FakeCardDav();
     fake.install();
@@ -475,6 +523,28 @@ describe('discovery', () => {
     expect(fake.requests.length).toBe(after);
     await discovery.registry(true);
     expect(fake.requests.length).toBeGreaterThan(after);
+  });
+});
+
+describe('get_contact_photo', () => {
+  it('refuses an oversized photo in its own words, not the reader\u2019s', async () => {
+    // The tool's ceiling has to sit below the read ceiling in `api.ts` once
+    // base64's third is accounted for, or this branch is unreachable and the
+    // caller gets "larger than 1048576 bytes" from the body reader instead of
+    // a sentence naming the tool that could help. It was 2 MiB, and was.
+    const fake = new FakeCardDav({ books: [{ name: 'work' }] });
+    fake.install();
+    const image = Buffer.alloc(600 * 1024, 7).toString('base64');
+    fake.seed(
+      'work',
+      'big.vcf',
+      `BEGIN:VCARD\r\nVERSION:3.0\r\nUID:u-big\r\nFN:Big\r\nPHOTO;ENCODING=b;TYPE=JPEG:${image}\r\nEND:VCARD\r\n`
+    );
+    session = await connect();
+    const listed = dataOf(await call(session, 'list_contacts'));
+    const id = (listed.contacts as Record<string, unknown>[])[0]?.id as string;
+    const result = await call(session, 'get_contact_photo', { id });
+    expect(textOf(result)).toContain('get_contact reports its size');
   });
 });
 
@@ -561,6 +631,35 @@ describe('a server without credentials', () => {
     const result = await call(session, 'list_address_books');
     expect(textOf(result)).toContain('missing required environment variable');
     expect(textOf(result)).toContain('CARDDAV_URL');
+  });
+});
+
+describe('list_contacts and the group cards it hides', () => {
+  it('says how many it left out rather than simply not showing them', async () => {
+    // Every other omission in this server reports a count — the allowlist's
+    // `withheld`, the limit note, the unreadable tally. An absence nobody
+    // explained reads as a non-existence, and "there are no groups here" is a
+    // different fact from "you did not ask for them".
+    const fake = new FakeCardDav({
+      books: [
+        {
+          name: 'work',
+          resources: {
+            'a.vcf': vcard({ UID: 'u-a', FN: 'Ada' }),
+            'g.vcf': vcard({
+              UID: 'u-g',
+              FN: 'Team',
+              'X-ADDRESSBOOKSERVER-KIND': 'group',
+            }),
+          },
+        },
+      ],
+    });
+    fake.install();
+    session = await connect();
+    const data = dataOf(await call(session, 'list_contacts'));
+    expect(data.count).toBe(1);
+    expect(JSON.stringify(data.notes)).toContain('1 group card');
   });
 });
 

@@ -42,7 +42,13 @@ import {
   setMembers,
   versionOf,
 } from '../vcard.js';
-import { blankCard, createCard, deleteCard, replaceCard } from '../write.js';
+import {
+  blankCard,
+  createCard,
+  deleteCard,
+  keyPart,
+  replaceCard,
+} from '../write.js';
 import { CREATE, DELETE, READ_ONLY, REPLACE } from './annotations.js';
 import {
   applyLimit,
@@ -400,8 +406,14 @@ export function registerGroupWriteTools(
               // The exact membership the write would produce, so a token
               // issued for one change cannot execute a different one.
               [...next].sort().join(','),
-              args.name ?? '',
-              args.note === undefined ? '' : (args.note ?? ' null'),
+              // Three states, three distinct spellings. `undefined` used to
+              // encode as the empty string and `null` as `' null'`, which made
+              // "leave the name alone" and "set the name to empty" the same
+              // resource key -- so a token issued for a rename also executed a
+              // `note: ""`, and `removeAllProperties('note')` below destroyed a
+              // note nothing had warned about.
+              keyPart(args.name),
+              keyPart(args.note),
             ]),
             token: args.confirm_token,
             toolName: 'update_group',

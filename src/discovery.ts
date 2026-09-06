@@ -197,9 +197,16 @@ export class Discovery {
     // 2. RFC 6764's well-known route, which is defined *as* a redirect. Only
     //    tried when the configured URL did not already answer.
     if (principalHref === undefined) {
-      const context = await this.api.probeWellKnown();
-      if (context !== undefined) {
-        const viaWellKnown = await this.probe(context);
+      const probe = await this.api.probeWellKnown();
+      if (probe.refusedOrigin !== undefined) {
+        notes.push(
+          `The well-known route redirected to ${probe.refusedOrigin}, which is ` +
+            'not the configured server, so it was not followed. If that is ' +
+            'the right address book host, set CARDDAV_URL to it.'
+        );
+      }
+      if (probe.url !== undefined) {
+        const viaWellKnown = await this.probe(probe.url);
         principalHref = firstHref(
           viaWellKnown[0]?.props['current-user-principal']
         );

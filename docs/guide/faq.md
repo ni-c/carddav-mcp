@@ -85,8 +85,14 @@ reports the address and does not follow it: that address was chosen by whoever
 wrote the card, and fetching it would make this process a request forwarder
 pointed at an arbitrary host.
 
-Or the photo is past the two-megabyte ceiling this tool applies. `get_contact`
+Or the photo is past the half-megabyte ceiling this tool applies. `get_contact`
 reports the size without fetching anything.
+
+That ceiling is deliberately well under the one-mebibyte ceiling on reading a
+card at all, and the gap is base64: an embedded photo costs a third more inside
+the card than it does as bytes. A tool ceiling set above the read ceiling is a
+tool ceiling that never fires — the read refuses first, with a message about
+byte counts instead of one naming the tool that can help.
 
 ## Everything is `partial: true`
 

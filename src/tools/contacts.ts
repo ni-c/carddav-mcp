@@ -5,6 +5,7 @@ import { assess } from '../analyze.js';
 import {
   SUMMARY_PROPS,
   syncCollectionBody,
+  textOf,
   type PropFilter,
 } from '../dav-xml.js';
 import { ToolInputError } from '../errors.js';
@@ -55,8 +56,16 @@ import {
  * be read at all, this one bounds what is worth putting into a model's context
  * as base64. A contact photograph past this size is a scan of something rather
  * than a portrait.
+ *
+ * "Below" has to be read in the right units, and the first value here was not.
+ * At 2 MiB this branch was unreachable: the photo is inline base64 inside a
+ * card, the card is read under `MAX_RESOURCE_BYTES` (1 MiB), and base64 costs a
+ * third on top — so the read refused first and the friendly message below could
+ * never fire. Half a mebibyte of image is roughly 683 kB of base64, which
+ * leaves room for the rest of the card under that ceiling and makes the refusal
+ * this tool documents an outcome that actually happens.
  */
-const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
+const MAX_PHOTO_BYTES = 512 * 1024;
 
 /**
  * The read tools for contacts.
@@ -114,6 +123,7 @@ export function registerContactTools(
 
         const collected: string[] = [];
         let unreadable = 0;
+        let groupsHidden = 0;
         const shaped: Record<string, unknown>[] = [];
         for (const document of documents) {
           let card: ICAL.Component;
@@ -130,7 +140,10 @@ export function registerContactTools(
             document.etag,
             true
           );
-          if (entry.is_group === true && args.include_groups !== true) continue;
+          if (entry.is_group === true && args.include_groups !== true) {
+            groupsHidden += 1;
+            continue;
+          }
           shaped.push(entry);
         }
 
@@ -145,6 +158,17 @@ export function registerContactTools(
           collected.push(
             `${unreadable} card(s) could not be parsed and were left out. ` +
               'They are usually old exports from another client.'
+          );
+        }
+        // Counted rather than merely skipped, for the same reason
+        // `list_address_books` counts what the allowlist withheld: an absence
+        // nobody explained reads as a non-existence, and "there are no groups
+        // in this book" is a different fact from "you did not ask for them".
+        if (groupsHidden > 0) {
+          collected.push(
+            `${groupsHidden} group card(s) are in these address books and were ` +
+              'left out. Pass include_groups to list them here, or use ' +
+              'list_groups.'
           );
         }
 
@@ -504,10 +528,14 @@ export function registerContactTools(
             removed.push(id);
             continue;
           }
-          const etag = response.props.getetag;
+          // Through `textOf` like every other property this server reads out
+          // of a multistatus, rather than straight off `props`: that is where
+          // the entity decoding and the attribute-shaped-value refusal live,
+          // and an ETag read raw arrives with its `&quot;` still in it.
+          const etag = textOf(response.props.getetag);
           changed.push({
             id,
-            ...(typeof etag === 'string' ? { etag } : {}),
+            ...(etag === undefined ? {} : { etag }),
           });
         }
 

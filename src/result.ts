@@ -44,10 +44,34 @@ export function budget(
   followUp: string,
   maxBytes = MAX_RESULT_BYTES
 ): Record<string, unknown> {
+  // The note is part of the payload, so it has to be inside the measurement.
+  // Appending it after the loop had already accepted the size put the answer
+  // back over the ceiling by exactly the length of the sentence that says the
+  // answer is under the ceiling. Measuring the *finished* value each time is
+  // the only version of this with no such gap, and it costs nothing while
+  // nothing is being dropped: with `dropped === 0` this is the input object.
+  const finished = (
+    payload: Record<string, unknown>,
+    dropped: number
+  ): Record<string, unknown> => {
+    if (dropped === 0) return payload;
+    const existing = Array.isArray(payload.notes)
+      ? (payload.notes as string[])
+      : [];
+    return {
+      ...payload,
+      notes: [
+        ...existing,
+        `${dropped} entr${dropped === 1 ? 'y was' : 'ies were'} left out to keep ` +
+          `the answer under ${maxBytes} characters. ${followUp}`,
+      ],
+    };
+  };
+
   let current = data;
   let dropped = 0;
 
-  while (JSON.stringify(current).length > maxBytes) {
+  while (JSON.stringify(finished(current, dropped)).length > maxBytes) {
     const key = largestArrayKey(current);
     if (key === undefined) break;
     const list = current[key] as unknown[];
@@ -57,7 +81,8 @@ export function budget(
     current = { ...current, [key]: list.slice(0, keep) };
   }
 
-  if (JSON.stringify(current).length > maxBytes) {
+  const result = finished(current, dropped);
+  if (JSON.stringify(result).length > maxBytes) {
     // Nothing left to drop, and the remainder still does not fit. That is a
     // refusal, so it becomes an error result — not an envelope of a shape the
     // tool never declared.
@@ -66,19 +91,7 @@ export function budget(
         `dropping entries. ${followUp}`
     );
   }
-
-  if (dropped === 0) return current;
-  const existing = Array.isArray(current.notes)
-    ? (current.notes as string[])
-    : [];
-  return {
-    ...current,
-    notes: [
-      ...existing,
-      `${dropped} entr${dropped === 1 ? 'y was' : 'ies were'} left out to keep ` +
-        `the answer under ${maxBytes} characters. ${followUp}`,
-    ],
-  };
+  return result;
 }
 
 function largestArrayKey(data: Record<string, unknown>): string | undefined {
