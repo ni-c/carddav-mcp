@@ -63,6 +63,34 @@ const MAX_STATUS_BODY_BYTES = 1 * 1024 * 1024;
 const MAX_TOKEN_CHARS = 128;
 const MAX_TOKENS = 40;
 
+/**
+ * Ceiling on an error body that is read for its message.
+ *
+ * Separate from the ceilings above, and smaller than all of them: a body that
+ * arrives with a non-2xx status is read only so that a DAV error document can
+ * name its precondition, and `parseDavError` looks at nothing past 64 KiB
+ * anyway. It is also *cut* rather than refused — a reverse proxy answering
+ * `401` with a two-megabyte login page used to surface as "the answer was
+ * larger than 1048576 bytes and was refused", which hid the status and the
+ * hint about credentials behind a sentence about size.
+ */
+const MAX_ERROR_BODY_BYTES = 64 * 1024;
+
+/**
+ * How long a `401` is remembered before the credentials are tried again.
+ *
+ * Every request authenticates, so a wrong password is refused on every call —
+ * and a model that reads "authentication refused" retries, on a tool annotated
+ * read-only and cheap. Hosted providers lock an account after a handful of
+ * failed logins, which turns one mistyped password into a locked mailbox. For
+ * ten seconds after a `401` the same refusal is repeated from memory, with a
+ * note saying when the next real attempt happens.
+ */
+const AUTH_COOLDOWN_MS = 10_000;
+
+/** The longest ETag this server will send back in `If-Match`. */
+const MAX_ETAG_CHARS = 1024;
+
 export class CardDavApiError extends Error {
   constructor(
     public readonly status: number,
@@ -133,6 +161,8 @@ export class CardDavApi {
    * disabling it process-wide via NODE_TLS_REJECT_UNAUTHORIZED.
    */
   private readonly insecureDispatcher: Agent | undefined;
+  /** The last `401`, repeated from memory until `until` — see the constant. */
+  private refusedAuth: { until: number; error: CardDavApiError } | undefined;
 
   constructor(config: Config) {
     this.config = config;
@@ -244,6 +274,27 @@ export class CardDavApi {
       );
     }
 
+    if (this.refusedAuth !== undefined) {
+      const remaining = this.refusedAuth.until - Date.now();
+      if (remaining > 0) {
+        const { error } = this.refusedAuth;
+        const repeated = new CardDavApiError(
+          error.status,
+          error.body,
+          method,
+          url,
+          error.precondition
+        );
+        repeated.message +=
+          ' (repeated from memory: the server refused the credentials ' +
+          `${Math.ceil((AUTH_COOLDOWN_MS - remaining) / 1000)} s ago, and they ` +
+          `are not tried again for ${Math.ceil(remaining / 1000)} s, so a ` +
+          'retry cannot lock the account)';
+        throw repeated;
+      }
+      this.refusedAuth = undefined;
+    }
+
     const headers: Record<string, string> = {
       'User-Agent': 'carddav-mcp',
       ...(options.accept === undefined ? {} : { Accept: options.accept }),
@@ -269,12 +320,30 @@ export class CardDavApi {
     // configured origin may use the relaxed dispatcher.
     const useInsecure =
       this.insecureDispatcher !== undefined && this.isConfiguredOrigin(url);
-    const response = useInsecure
-      ? ((await undiciFetch(url, {
-          ...init,
-          dispatcher: this.insecureDispatcher,
-        } as UndiciRequestInit)) as unknown as Response)
-      : await fetch(url, init);
+    let response: Response;
+    try {
+      response = useInsecure
+        ? ((await undiciFetch(url, {
+            ...init,
+            dispatcher: this.insecureDispatcher,
+          } as UndiciRequestInit)) as unknown as Response)
+        : await fetch(url, init);
+    } catch (error) {
+      // undici reports a refused redirect as `TypeError: fetch failed` with
+      // the cause `unexpected redirect` — which reached the model as exactly
+      // those two words, with no hint that a proxy in front of the server is
+      // redirecting, or that CARDDAV_URL should name where it redirects to.
+      if (isRedirectRefusal(error)) {
+        throw new Error(
+          `the CardDAV server answered ${method} ${quoted(redactPath(url))} ` +
+            'with a redirect, which carddav-mcp does not follow: following one ' +
+            'would resend the credentials to whatever address the server ' +
+            'named. Set CARDDAV_URL to the address the server redirects to.',
+          { cause: error }
+        );
+      }
+      throw error;
+    }
 
     return {
       status: response.status,
@@ -287,10 +356,8 @@ export class CardDavApi {
   /** `OPTIONS`: the `DAV:` compliance tokens and the allowed methods. */
   async options(url: string): Promise<{ dav: string[]; allow: string[] }> {
     const { ok, status, headers, response } = await this.send('OPTIONS', url);
-    const body = (
-      await readBoundedBody(response, url, MAX_STATUS_BODY_BYTES)
-    ).toString('utf8');
-    if (!ok) throw await apiError(status, body, 'OPTIONS', url);
+    if (!ok) throw await this.failed(status, response, 'OPTIONS', url);
+    await readBoundedBody(response, url, MAX_STATUS_BODY_BYTES);
     // A response header is a string the far end chose, and `get_server_info`
     // hands these two straight to the model in this server's own voice — the
     // one result in the file that is deliberately *not* marked untrusted, on
@@ -355,9 +422,9 @@ export class CardDavApi {
       body,
       accept: 'application/xml, text/xml',
     });
+    if (!ok) throw await this.failed(status, response, 'REPORT', url);
     const bytes = await readBoundedBody(response, url, MAX_MULTISTATUS_BYTES);
     const text = bytes.toString('utf8');
-    if (!ok) throw await apiError(status, text, 'REPORT', url);
     const where = `CardDAV REPORT ${redactPath(url)}`;
     return {
       responses: parseMultiStatus(text, where),
@@ -376,9 +443,9 @@ export class CardDavApi {
       body,
       accept: 'application/xml, text/xml',
     });
+    if (!ok) throw await this.failed(status, response, method, url);
     const bytes = await readBoundedBody(response, url, MAX_MULTISTATUS_BYTES);
     const text = bytes.toString('utf8');
-    if (!ok) throw await apiError(status, text, method, url);
     return parseMultiStatus(text, `CardDAV ${method} ${redactPath(url)}`);
   }
 
@@ -387,14 +454,16 @@ export class CardDavApi {
     const { ok, status, headers, response } = await this.send('GET', url, {
       accept: 'text/vcard, text/x-vcard;q=0.5',
     });
+    if (!ok) throw await this.failed(status, response, 'GET', url);
     const bytes = await readBoundedBody(
       response,
       url,
       forWrite ? MAX_ROUNDTRIP_BYTES : MAX_RESOURCE_BYTES
     );
-    const text = bytes.toString('utf8');
-    if (!ok) throw await apiError(status, text, 'GET', url);
-    return { vcf: text, etag: normaliseEtag(headers.get('etag')) };
+    return {
+      vcf: bytes.toString('utf8'),
+      etag: normaliseEtag(headers.get('etag')),
+    };
   }
 
   /**
@@ -424,10 +493,8 @@ export class CardDavApi {
       contentType: 'text/vcard; charset=utf-8',
       headers,
     });
-    const text = (
-      await readBoundedBody(response, url, MAX_STATUS_BODY_BYTES)
-    ).toString('utf8');
-    if (!ok) throw await apiError(status, text, 'PUT', url);
+    if (!ok) throw await this.failed(status, response, 'PUT', url);
+    await readBoundedBody(response, url, MAX_STATUS_BODY_BYTES);
     return { etag: normaliseEtag(got.get('etag')), status };
   }
 
@@ -436,11 +503,32 @@ export class CardDavApi {
     const { ok, status, response } = await this.send('DELETE', url, {
       headers: { 'If-Match': ifMatch },
     });
-    const text = (
-      await readBoundedBody(response, url, MAX_STATUS_BODY_BYTES)
-    ).toString('utf8');
-    if (!ok) throw await apiError(status, text, 'DELETE', url);
+    if (!ok) throw await this.failed(status, response, 'DELETE', url);
+    await readBoundedBody(response, url, MAX_STATUS_BODY_BYTES);
     return status;
+  }
+
+  /**
+   * Builds the error for a non-2xx answer, reading the body for its message.
+   *
+   * The status is decided *before* the body is read, and the body is read under
+   * its own small ceiling that cuts instead of refusing — see
+   * `MAX_ERROR_BODY_BYTES`. A `401` is also remembered for
+   * `AUTH_COOLDOWN_MS`, so a retry inside that window is answered from memory
+   * and never reaches the provider's login counter.
+   */
+  private async failed(
+    status: number,
+    response: BodyLike,
+    method: string,
+    url: string
+  ): Promise<CardDavApiError> {
+    const body = (await readErrorBody(response)).toString('utf8');
+    const error = await apiError(status, body, method, url);
+    if (status === 401) {
+      this.refusedAuth = { until: Date.now() + AUTH_COOLDOWN_MS, error };
+    }
+    return error;
   }
 
   /**
@@ -565,7 +653,7 @@ const MAX_SYNC_TOKEN_CHARS = 512;
  * A value that fails is dropped, and the existing "answered without a sync
  * token" note already tells the caller what that means for the next call.
  */
-function isOpaqueToken(value: string): boolean {
+export function isOpaqueToken(value: string): boolean {
   return (
     value.length <= MAX_SYNC_TOKEN_CHARS &&
     // RFC 3986's unreserved + reserved + percent, and nothing else. No spaces,
@@ -612,7 +700,39 @@ function normaliseEtag(raw: string | null): string | undefined {
   if (raw === null) return undefined;
   const value = raw.trim();
   if (value === '' || value.startsWith('W/')) return undefined;
+  // The value goes back out in an `If-Match` header, and a header value is
+  // the one place where the server's string is not merely displayed. undici
+  // refuses a header carrying a control character with a `TypeError`, which
+  // reached the model as `carddav-mcp: fetch failed` — and every write to that
+  // card was refused that way for as long as the server kept sending it.
+  // RFC 9110 §8.8.3 spells an entity tag from visible ASCII (plus obs-text);
+  // anything else is not an ETag and is treated like a weak one: no guard,
+  // so the write path refuses with a sentence instead.
+  if (value.length > MAX_ETAG_CHARS || !isHeaderSafe(value)) return undefined;
   return value;
+}
+
+/** Whether a string can travel in an HTTP header: no controls, no DEL, no NUL. */
+function isHeaderSafe(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether a fetch failure is undici refusing to follow a redirect.
+ *
+ * `redirect: 'error'` surfaces as `TypeError: fetch failed` whose `cause` is an
+ * `Error` reading `unexpected redirect`. Matched on the text because undici
+ * exports no error class for it.
+ */
+function isRedirectRefusal(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const cause = (error as { cause?: unknown }).cause;
+  const text = cause instanceof Error ? cause.message : String(cause ?? '');
+  return /unexpected redirect/i.test(text) || /redirect/i.test(error.message);
 }
 
 /** Keeps a URL's query and userinfo out of an error message. */
@@ -623,6 +743,51 @@ function redactPath(url: string): string {
   } catch {
     return url.replace(/\?.*$/, '');
   }
+}
+
+/** The part of a `Response` the body readers need. */
+interface BodyLike {
+  headers: Headers;
+  body?: unknown;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+
+/**
+ * Reads the body of a failed request, up to `MAX_ERROR_BODY_BYTES`.
+ *
+ * Unlike {@link readBoundedBody} this never throws on size: the caller is
+ * already building an error about the status, and the body is only ever a
+ * message to attach to it. Past the ceiling the rest is cancelled and what was
+ * read is kept — a DAV error document is a few hundred bytes and sits at the
+ * front; a login page past 64 KiB has nothing to say anyway.
+ */
+async function readErrorBody(response: BodyLike): Promise<Buffer> {
+  const body = response.body;
+  if (!hasStreamingBody(body)) {
+    const declared = Number(response.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > MAX_ERROR_BODY_BYTES) {
+      return Buffer.alloc(0);
+    }
+    return Buffer.from(await response.arrayBuffer()).subarray(
+      0,
+      MAX_ERROR_BODY_BYTES
+    );
+  }
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value === undefined) continue;
+    chunks.push(value);
+    total += value.byteLength;
+    if (total >= MAX_ERROR_BODY_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      break;
+    }
+  }
+  return Buffer.concat(chunks).subarray(0, MAX_ERROR_BODY_BYTES);
 }
 
 /** Minimal shape of a response body we can read incrementally. */
@@ -651,11 +816,7 @@ function hasStreamingBody(body: unknown): body is StreamingBody {
  * afterwards.
  */
 async function readBoundedBody(
-  response: {
-    headers: Headers;
-    body?: unknown;
-    arrayBuffer(): Promise<ArrayBuffer>;
-  },
+  response: BodyLike,
   url: string,
   maxBytes: number
 ): Promise<Buffer> {

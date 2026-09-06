@@ -1,5 +1,6 @@
 import { internalHostKind } from 'mcp-internal-hosts';
 
+import { quoted } from './analyze.js';
 import { redactUnparsedUrl } from './redact.js';
 
 /** Default number of contacts a listing returns when the caller does not say. */
@@ -113,9 +114,13 @@ export function parseElicitation(raw: string | undefined): boolean {
   const value = raw?.trim().toLowerCase();
   if (value === undefined || value === '' || value === 'true') return true;
   if (value === 'false') return false;
+  // `quoted`, short: the value is whatever was pasted into the variable, and a
+  // diagnostic that repeats it in full repeats a password pasted into the
+  // wrong line — escaped, so an ESC or a direction override in it cannot
+  // rewrite the line it is printed on.
   console.error(
-    `carddav-mcp: ELICITATION must be "true" or "false" — got "${raw}". ` +
-      'Refusing to start rather than guess.'
+    `carddav-mcp: ELICITATION must be "true" or "false" — got ` +
+      `"${quoted(raw ?? '', 40)}". Refusing to start rather than guess.`
   );
   process.exit(1);
 }
@@ -158,7 +163,7 @@ function parseMaxEntries(raw: string | undefined): number {
   if (!Number.isInteger(value) || value < 1 || value > MAX_MAX_ENTRIES) {
     console.error(
       `carddav-mcp: CARDDAV_MAX_CONTACTS must be an integer between 1 and ` +
-        `${MAX_MAX_ENTRIES} — got "${raw}".`
+        `${MAX_MAX_ENTRIES} — got "${quoted(raw, 40)}".`
     );
     process.exit(1);
   }
@@ -334,9 +339,12 @@ function warnAboutUnencodedPaths(entries: readonly string[]): void {
     (entry) => entry.startsWith('/') && /[\s"<>`{|}]|[^\x20-\x7e]/.test(entry)
   );
   if (suspect.length === 0) return;
+  // The predicate above selects entries *because* they carry characters a
+  // terminal may not show — ESC, a direction override, a zero-width space —
+  // so this is the one line where printing them raw is guaranteed to matter.
   console.error(
     `carddav-mcp: CARDDAV_ADDRESSBOOKS entr${suspect.length === 1 ? 'y' : 'ies'} ` +
-      `${suspect.map((entry) => `"${entry}"`).join(', ')} contain${
+      `${suspect.map((entry) => `"${quoted(entry, 80)}"`).join(', ')} contain${
         suspect.length === 1 ? 's' : ''
       } characters that appear percent-encoded in an address book path, so ` +
       'the entry will match nothing as written. Write the path the way ' +

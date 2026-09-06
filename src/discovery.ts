@@ -1,7 +1,11 @@
 import { CardDavApiError, type CardDavApi } from './api.js';
+import { quoted } from './analyze.js';
 import {
   AddressBookRegistry,
+  describeAllowlistEntry,
+  MAX_ADDRESS_BOOKS,
   normalisePath,
+  stripTrailingSlashes,
   type AddressBookEntry,
 } from './books.js';
 import {
@@ -213,8 +217,10 @@ export class Discovery {
     if (principalHref === undefined) {
       const probe = await this.api.probeWellKnown();
       if (probe.refusedOrigin !== undefined) {
+        // An origin the server chose, going into a note: quoted like every
+        // other server string that reaches the model outside a fence.
         notes.push(
-          `The well-known route redirected to ${probe.refusedOrigin}, which is ` +
+          `The well-known route redirected to ${quoted(probe.refusedOrigin)}, which is ` +
             'not the configured server, so it was not followed. If that is ' +
             'the right address book host, set CARDDAV_URL to it.'
         );
@@ -300,7 +306,14 @@ export class Discovery {
 
     // Stable order, so two runs of the same listing agree.
     found.sort((left, right) => left.path.localeCompare(right.path));
-    const registry = new AddressBookRegistry(dedupe(found), this.allowlist);
+    const unique = dedupe(found);
+    // Capped, and the overflow is counted rather than dropped in silence —
+    // see `MAX_ADDRESS_BOOKS` for what an uncapped list cost.
+    const registry = new AddressBookRegistry(
+      unique.slice(0, MAX_ADDRESS_BOOKS),
+      this.allowlist,
+      Math.max(0, unique.length - MAX_ADDRESS_BOOKS)
+    );
 
     // The allowlist is checked here because here is the first moment it can be:
     // its entries are matched against books that do not exist until this method
@@ -319,7 +332,8 @@ export class Discovery {
           ambiguous
             .map(
               ({ entry, paths }) =>
-                `"${entry}" matches ${paths.length} address books (${paths.join(', ')})`
+                `${describeAllowlistEntry(entry)} matches ${paths.length} ` +
+                `address books (${paths.map((path) => quoted(path)).join(', ')})`
             )
             .join('; ') +
           '. Name those address books by full path instead of by their last ' +
@@ -332,6 +346,10 @@ export class Discovery {
     // like, and refusing to start over a stale name would be worse than saying
     // so. Once per process — the registry is rebuilt whenever the cache
     // expires, and the same warning on a loop teaches people to ignore it.
+    //
+    // Through `describeAllowlistEntry`, never verbatim: an entry that matches
+    // nothing is exactly what a credential pasted into the wrong variable
+    // looks like, and this line goes to the MCP client's log file.
     if (!this.warnedUnmatched) {
       const unmatched = registry.unmatched();
       if (unmatched.length > 0) {
@@ -339,8 +357,8 @@ export class Discovery {
         console.error(
           `carddav-mcp: CARDDAV_ADDRESSBOOKS names ${unmatched.length} entr` +
             `${unmatched.length === 1 ? 'y' : 'ies'} matching no address book ` +
-            `on this account: ${unmatched.join(', ')}. Check the spelling — an ` +
-            `entry that matches nothing grants nothing.`
+            `on this account: ${unmatched.map(describeAllowlistEntry).join(', ')}. ` +
+            'Check the spelling — an entry that matches nothing grants nothing.'
         );
       }
     }
@@ -382,9 +400,18 @@ export class Discovery {
       return undefined;
     }
     const path = normalisePath(new URL(url).pathname);
+    // A collection has to live under the home it was listed from. A Depth:1
+    // PROPFIND answers with the home's children, so an href naming a path
+    // elsewhere on the server is not one of them — a server that lists
+    // `/someone-else/private/` inside the answer for `/tester/` was accepted
+    // as one of the account's books. The origin was already pinned by
+    // `resolveHref`; this pins the path the same way `resourceNameOf` does for
+    // a card. In the single-book case the home *is* the book.
+    const homePath = normalisePath(new URL(relativeTo).pathname);
+    if (!path.startsWith(homePath)) return undefined;
     const granted = privileges(response.props['current-user-privilege-set']);
     return {
-      url: `${url.replace(/\/+$/, '')}/`,
+      url: `${stripTrailingSlashes(url)}/`,
       path,
       displayName: textOf(response.props.displayname),
       description: textOf(response.props['addressbook-description']),

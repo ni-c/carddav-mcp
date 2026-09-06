@@ -335,3 +335,37 @@ describe('missingConfigMessage', () => {
     expect(message).not.toContain('CARDDAV_USER_EMAIL');
   });
 });
+
+describe('diagnostics never print a raw value', () => {
+  // Spelled at runtime, so this file carries no control character of its own.
+  const ESC = String.fromCharCode(27);
+  const RLO = String.fromCodePoint(0x202e);
+  const escapedEsc = ['\\', 'u001b'].join('');
+  const escapedRlo = ['\\', 'u202e'].join('');
+
+  it('cuts and escapes what ELICITATION and CARDDAV_MAX_CONTACTS were given', () => {
+    const pasted = `ghp_${'x'.repeat(20)}${ESC}[2J`;
+    const { errors } = catchExit(() => parseElicitation(pasted));
+    expect(errors.join('\n')).not.toContain(pasted);
+    expect(errors.join('\n')).not.toContain(ESC);
+    expect(errors.join('\n')).toContain(escapedEsc);
+    const { errors: more } = catchExit(() =>
+      loadConfig(env({ CARDDAV_MAX_CONTACTS: pasted }))
+    );
+    expect(more.join('\n')).not.toContain(ESC);
+  });
+
+  it('escapes the characters an unencoded allowlist path is flagged for', () => {
+    const { errors } = catchExit(() =>
+      loadConfig(
+        env({ CARDDAV_ADDRESSBOOKS: `/dav/${ESC}[2J/x/,/dav/a${RLO}b/` })
+      )
+    );
+    const out = errors.join('\n');
+    expect(out).toContain('percent-encoded');
+    expect(out).not.toContain(ESC);
+    expect(out).not.toContain(RLO);
+    expect(out).toContain(escapedEsc);
+    expect(out).toContain(escapedRlo);
+  });
+});

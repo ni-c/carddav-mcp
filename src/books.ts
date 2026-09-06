@@ -43,8 +43,23 @@ export interface AddressBookEntry {
 
 /** Normalises a collection path for comparison: exactly one trailing slash. */
 export function normalisePath(path: string): string {
-  const trimmed = path.replace(/\/+$/, '');
-  return `${trimmed}/`;
+  return `${stripTrailingSlashes(path)}/`;
+}
+
+/**
+ * Removes every trailing `/`, by counting rather than with `/\/+$/`.
+ *
+ * That regex is quadratic on a run of slashes: it is retried from every
+ * position of the run, and each attempt consumes the run to its end before `$`
+ * fails on whatever follows. `new URL()` keeps repeated slashes in a pathname,
+ * so a collection href of eighty thousand slashes and a letter reached here
+ * from discovery and cost two seconds — on the thread that serves every
+ * request. A loop walks the run once.
+ */
+export function stripTrailingSlashes(path: string): string {
+  let end = path.length;
+  while (end > 0 && path.charCodeAt(end - 1) === 0x2f) end -= 1;
+  return path.slice(0, end);
 }
 
 /**
@@ -82,6 +97,52 @@ function matches(entry: string, book: AddressBookEntry): boolean {
   }
   return finalSegment(book.path) === candidate.replace(/\/+$/, '');
 }
+
+/**
+ * Ceiling on how many address books a registry holds.
+ *
+ * Every listing tool defaults to *all* permitted books, one REPORT per book,
+ * thirty seconds allowed for each — so a server advertising two thousand
+ * collections turned one `list_contacts` into a call that could run for hours.
+ * No account has this many; the ones past the ceiling are counted and
+ * reported by `list_address_books`, not silently dropped.
+ */
+export const MAX_ADDRESS_BOOKS = 256;
+
+/** The longest allowlist entry that is ever quoted back. */
+const MAX_QUOTED_ENTRY_CHARS = 200;
+
+/**
+ * An allowlist entry, made safe to print.
+ *
+ * `CARDDAV_ADDRESSBOOKS` sits one line below `CARDDAV_PASSWORD` in every
+ * compose file, and the reaction to an entry that matches nothing used to be
+ * to print it in full — to stderr, which is the MCP client's log, and into the
+ * `list_address_books` answer, which is the model's context. A token pasted
+ * into the wrong line matches nothing, so it was the one value guaranteed to
+ * be printed. An entry is quoted only when it has the shape of something this
+ * server would match — a path, a URL or a bare segment — and is otherwise
+ * described by its length, the way `mcp-tool-allowlist` describes an entry
+ * that is not a tool name.
+ */
+export function describeAllowlistEntry(entry: string): string {
+  // A path or a URL announces itself with its first character and no
+  // credential starts that way. A bare segment does not: a JWT, a hex key and
+  // a base64 secret are all "letters, digits and a few punctuation marks",
+  // so a bare word is quoted only while it is short enough to be a word —
+  // `work`, `contacts`, `family` — and described by its length past that.
+  const shaped =
+    entry.length <= MAX_QUOTED_ENTRY_CHARS &&
+    (/^\/[\x21-\x7e]*$/.test(entry) ||
+      /^https?:\/\/[\x21-\x7e]*$/i.test(entry) ||
+      (entry.length <= MAX_QUOTED_SEGMENT_CHARS &&
+        /^[A-Za-z0-9_-]+$/.test(entry)));
+  if (shaped) return `"${quoted(entry, MAX_QUOTED_ENTRY_CHARS)}"`;
+  return `<an entry of ${entry.length} characters that is not shaped like an address book path, a short segment name or a URL — redacted in case it is a credential>`;
+}
+
+/** The longest bare segment that is quoted rather than described. */
+const MAX_QUOTED_SEGMENT_CHARS = 24;
 
 function finalSegment(path: string): string {
   const parts = path.split('/').filter((part) => part.length > 0);
@@ -134,7 +195,11 @@ export function resourceUrl(
   } catch {
     throw notInside();
   }
-  const parent = url.pathname.replace(/[^/]*$/, '');
+  // `lastIndexOf` rather than `/[^/]*$/`, for the reason on
+  // `stripTrailingSlashes`: the name is bounded by the id schema, so this one
+  // was never reachable at a size that mattered, but the same regex was and
+  // one spelling is easier to keep honest than two.
+  const parent = url.pathname.slice(0, url.pathname.lastIndexOf('/') + 1);
   if (
     parent !== book.path ||
     url.pathname === book.path ||
@@ -159,10 +224,17 @@ export class AddressBookRegistry implements AddressBookLookup {
   private readonly all: readonly AddressBookEntry[];
   private readonly permitted: readonly AddressBookEntry[];
   private readonly allowlist: readonly string[];
+  /** Address books discovery found past `MAX_ADDRESS_BOOKS` and left out. */
+  readonly truncated: number;
 
-  constructor(all: readonly AddressBookEntry[], allowlist: readonly string[]) {
+  constructor(
+    all: readonly AddressBookEntry[],
+    allowlist: readonly string[],
+    truncated = 0
+  ) {
     this.all = all;
     this.allowlist = allowlist;
+    this.truncated = truncated;
     this.permitted =
       allowlist.length === 0
         ? all

@@ -1,6 +1,8 @@
 import { assess, sanitizeShortText, sanitizeText } from './analyze.js';
+import { isOpaqueToken } from './api.js';
 import type { AddressBookEntry } from './books.js';
 import { buildEntityId } from './entity-id.js';
+import { redactUrlCredentials } from './redact.js';
 import {
   groupModelOf,
   membersOf,
@@ -33,6 +35,9 @@ import {
  * the call. So a field added here without a line there is a broken tool, not an
  * undocumented one.
  */
+
+/** Cap on a server-chosen URL shown for information (never round-tripped). */
+const MAX_URL_CHARS = 512;
 
 /** Properties this server reads by name. Anything else is reported by name only. */
 const KNOWN_PROPERTIES = new Set([
@@ -91,6 +96,20 @@ function cleanDate(
   return { ...date, raw: sanitizeShortText(date.raw) };
 }
 
+/**
+ * The single-line treatment for a field that holds a URL.
+ *
+ * A `URL`, an `IMPP` handle, a `PHOTO;VALUE=uri` and a `MEMBER` reference can
+ * all carry `scheme://user:password@host/`, and a card is written by somebody
+ * else — so the credentials in it are somebody else's, on their way into the
+ * model's context. `CARDDAV_URL` was redacted on its way to a log; these
+ * fields were not, and they are the only other strings here shaped like a URL.
+ */
+function cleanUrl(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return clean(redactUrlCredentials(value));
+}
+
 function cleanList(values: readonly string[]): string[] {
   return values
     .map((value) => clean(value))
@@ -98,11 +117,12 @@ function cleanList(values: readonly string[]): string[] {
 }
 
 function shapeTyped(
-  entries: readonly { value: string; types: string[]; preferred: boolean }[]
+  entries: readonly { value: string; types: string[]; preferred: boolean }[],
+  cleaner: (value: string | undefined) => string | undefined = clean
 ): { value: string; types: string[]; preferred: boolean }[] {
   return entries
     .map((entry) => ({
-      value: clean(entry.value) ?? '',
+      value: cleaner(entry.value) ?? '',
       types: entry.types,
       preferred: entry.preferred,
     }))
@@ -191,7 +211,7 @@ function otherProperties(card: ICAL.Component): string[] {
     const name = prop.name.toLowerCase();
     if (!KNOWN_PROPERTIES.has(name)) seen.add(name.toUpperCase());
   }
-  return [...seen].sort();
+  return [...seen].toSorted();
 }
 
 /** What both projections build first. */
@@ -250,7 +270,7 @@ function shapeCommon(
     // whole reason `openWorldHint` is false — but it is still a string a
     // stranger chose that lands in the model's context, and a `data:`-shaped
     // one can be arbitrarily long.
-    const uri = info.uri === undefined ? undefined : clean(info.uri);
+    const uri = cleanUrl(info.uri);
     if (uri !== undefined) photo.uri = uri;
     out.photo = photo;
   }
@@ -293,9 +313,9 @@ export function shapeFull(
 
   const addresses = shapeAddresses(card);
   if (addresses.length > 0) out.addresses = addresses;
-  const urls = shapeTyped(readTyped(card, 'url'));
+  const urls = shapeTyped(readTyped(card, 'url'), cleanUrl);
   if (urls.length > 0) out.urls = urls;
-  const impp = shapeTyped(readTyped(card, 'impp'));
+  const impp = shapeTyped(readTyped(card, 'impp'), cleanUrl);
   if (impp.length > 0) out.instant_messaging = impp;
 
   const birthday = cleanDate(readDate(card, 'bday'));
@@ -388,8 +408,11 @@ export function shapeAddressBook(
   book: AddressBookEntry
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {
+    // The id is the collection path and has to round-trip as `address_book`,
+    // so it is emitted as discovered; `url` is display-only and is cleaned like
+    // the other server-chosen strings below.
     id: book.path,
-    url: book.url,
+    url: sanitizeShortText(book.url, MAX_URL_CHARS),
     read_only: book.readOnly,
   };
   const set = (key: string, value: unknown): void => {
@@ -397,12 +420,23 @@ export function shapeAddressBook(
   };
   set('display_name', clean(book.displayName));
   set('description', clean(book.description));
-  // Both are opaque strings the DAV server chooses, of no fixed length and no
-  // fixed alphabet. Nothing downstream parses them, so cleaning costs nothing;
-  // leaving them raw put the one field a hostile server fully controls into the
-  // model's context unbounded.
+  // An opaque string the DAV server chooses, of no fixed length and no fixed
+  // alphabet. Nothing downstream parses it, so cleaning costs nothing; leaving
+  // it raw put a field a hostile server fully controls into the model's
+  // context unbounded.
   set('ctag', clean(book.ctag));
-  set('sync_token', clean(book.syncToken));
+  // The sync token is the exception, and it is **validated, not cleaned**: the
+  // caller hands it back verbatim to `list_changes`, so NFKC-folding it or
+  // cutting it at 400 characters with an ellipsis — which is what `clean` did
+  // — returned a token that failed the next sync against a server doing
+  // nothing wrong. `isOpaqueToken` is the same rule `list_changes` applies to
+  // the token it returns itself: a URI, bounded, or nothing.
+  set(
+    'sync_token',
+    book.syncToken !== undefined && isOpaqueToken(book.syncToken)
+      ? book.syncToken
+      : undefined
+  );
   set('max_resource_size', book.maxResourceSize);
   const versions = book.supportedTypes.map((type) => type.version);
   if (versions.length > 0) out.supported_versions = [...new Set(versions)];
@@ -427,7 +461,7 @@ export function shapeGroup(
     // member line is an image reference would otherwise reach the model
     // unfenced through `get_group`.
     const entry: Record<string, unknown> = {
-      reference: sanitizeShortText(reference),
+      reference: sanitizeShortText(redactUrlCredentials(reference)),
     };
     if (uid !== undefined) entry.uid = sanitizeShortText(uid);
     if (found !== undefined) {

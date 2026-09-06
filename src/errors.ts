@@ -61,16 +61,14 @@ export class AllowlistError extends Error {
 }
 
 /**
- * A resource changed between the read and the write, so nothing was written.
+ * A write could not be guarded, so nothing was written.
  *
- * Carries the state read back afterwards, so the tool can tell the caller what
- * the contact is now instead of quoting `412` at them.
+ * Raised before the request goes out, when the card was read without a usable
+ * ETag. A genuine `412` from the server travels as a {@link CardDavApiError}
+ * and gets its hint in `result.ts`.
  */
 export class PreconditionFailedError extends Error {
-  constructor(
-    message: string,
-    public readonly current?: Record<string, unknown>
-  ) {
+  constructor(message: string) {
     super(message);
     this.name = 'PreconditionFailedError';
   }

@@ -244,8 +244,20 @@ export function parseMultiStatus(xml: string, what: string): DavResponse[] {
   let doc: Record<string, unknown>;
   try {
     doc = parser.parse(xml) as Record<string, unknown>;
-  } catch {
-    throw new Error(`${what} did not return parseable XML.`);
+  } catch (error) {
+    // fast-xml-parser refuses `__proto__`, `constructor` and `prototype` as
+    // element names, which is the right outcome — but it says so by throwing,
+    // and "did not return parseable XML" reads like a broken endpoint where
+    // the truth is a server sending element names no DAV document contains.
+    const reason = error instanceof Error ? error.message : '';
+    if (/\[SECURITY\]/.test(reason)) {
+      throw new Error(
+        `${what} returned XML with an element name that is a JavaScript ` +
+          'prototype key, which this server refuses to read.',
+        { cause: error }
+      );
+    }
+    throw new Error(`${what} did not return parseable XML.`, { cause: error });
   }
   const multistatus = doc.multistatus as { response?: unknown[] } | undefined;
   if (multistatus === undefined) {
@@ -257,13 +269,18 @@ export function parseMultiStatus(xml: string, what: string): DavResponse[] {
   const responses = Array.isArray(multistatus.response)
     ? multistatus.response
     : [];
-  return responses.map((raw) => {
+  return responses.flatMap((raw): DavResponse[] => {
     const entry = raw as {
       href?: unknown[];
       propstat?: unknown[];
       status?: unknown;
     };
     const href = decodeXmlText(String(firstOf(entry.href) ?? ''));
+    // An href past the ceiling is not a link this server will ever address —
+    // an id is bounded at 2048 characters, a collection path is shorter — so
+    // the response is dropped rather than carried into every function that
+    // takes the path apart. See `MAX_HREF_CHARS`.
+    if (href.length > MAX_HREF_CHARS) return [];
     const props: Record<string, unknown> = {};
     for (const rawStat of entry.propstat ?? []) {
       const stat = rawStat as { prop?: unknown; status?: unknown };
@@ -285,13 +302,31 @@ export function parseMultiStatus(xml: string, what: string): DavResponse[] {
     if (typeof props['address-data'] === 'string') {
       props['address-data'] = decodeAddressData(props['address-data']);
     }
-    return {
-      href,
-      props,
-      status: entry.status === undefined ? undefined : String(entry.status),
-    };
+    return [
+      {
+        href,
+        props,
+        status: entry.status === undefined ? undefined : String(entry.status),
+      },
+    ];
   });
 }
+
+/**
+ * The longest `<D:href>` a multistatus response may carry and still be read.
+ *
+ * A href is a server-chosen string with no length of its own, and every
+ * function that takes a path apart used to run on it unbounded. One response
+ * with an 80 000-character segment cost two seconds in `resourceNameOf`; a
+ * segment filling the 16 MiB multistatus ceiling cost hours, for one REPORT.
+ * Those functions are linear now, and this is the ceiling in front of them:
+ * 8 KiB is longer than any URL a real CardDAV server issues and longer than
+ * any id this server accepts, so nothing a caller can name is lost.
+ */
+export const MAX_HREF_CHARS = 8 * 1024;
+
+/** The longest element name `parseDavError` reports as a precondition. */
+const MAX_PRECONDITION_CHARS = 64;
 
 /** `HTTP/1.1 200 OK` → true; `HTTP/1.1 404 Not Found` → false. */
 function isOkStatus(status: string): boolean {
@@ -697,9 +732,14 @@ export function parseDavError(
   }
   const entries = error as Record<string, unknown>;
   const message = textOf(entries.message);
-  const precondition = Object.keys(entries).find(
-    (key) => key !== 'message' && !key.startsWith('@_') && key !== '#text'
-  );
+  // The element name is the server's, of no fixed length — 5 000 characters
+  // came through here as a "precondition" and reached the error text. A real
+  // one (`no-uid-conflict`, `supported-address-data`) is a short token.
+  const precondition = Object.keys(entries)
+    .find(
+      (key) => key !== 'message' && !key.startsWith('@_') && key !== '#text'
+    )
+    ?.slice(0, MAX_PRECONDITION_CHARS);
   if (precondition === undefined && message === undefined) return undefined;
   return {
     ...(precondition === undefined ? {} : { precondition }),

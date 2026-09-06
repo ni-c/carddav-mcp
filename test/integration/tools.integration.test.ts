@@ -174,13 +174,21 @@ describe('contacts', () => {
     expect(vcf).toContain('CATEGORIES:history,maths');
   });
 
-  it('exports the raw card', async () => {
-    const answer = data(
-      await asking.call('export_contacts', { address_book: 'work' })
-    );
+  it('exports the raw card in structuredContent and a defused rendering as text', async () => {
+    // The one tool whose two channels differ on purpose: the structured half
+    // is the byte-exact export, the text block is fenced and defused.
+    const result = await asking.raw('export_contacts', {
+      address_book: 'work',
+    });
+    const answer = result.structuredContent as Record<string, unknown>;
     expect(answer.count).toBe(1);
     const [entry] = answer.vcards as { vcard: string }[];
     expect(entry?.vcard).toContain('BEGIN:VCARD');
+    const text = (result.content as { type: string; text?: string }[])
+      .map((block) => block.text ?? '')
+      .join('\n');
+    expect(text).toContain('byte-exact export is in structuredContent');
+    expect(text).toContain('BEGIN UNTRUSTED CONTACT CONTENT');
   });
 
   it('reports a photo without delivering it, then delivers it when asked', async () => {

@@ -359,9 +359,12 @@ describe('photos', () => {
         ]),
         'a card'
       );
+      // Bytes that are none of the four raster formats are not handed over
+      // at all: an `application/octet-stream` image block is a label a client
+      // that saves the bytes and sniffs them itself does not read.
       const photo = photoBytes(parsed);
       expect(photo?.mediaType).not.toBe(claimed);
-      expect(photo?.mediaType).toBe('application/octet-stream');
+      expect(photo).toBeUndefined();
     }
   );
 

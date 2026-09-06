@@ -87,6 +87,27 @@ export interface FakeOptions {
    * content — so what a hostile value does to it is a test, not a hypothetical.
    */
   dav?: string;
+  /** Issue weak ETags (`W/"…"`), which cannot guard a write. */
+  weakEtags?: boolean;
+  /** Issue ETags of this shape instead of `"etag-N"`; `%d` is the counter. */
+  etagShape?: string;
+  /** Answer every guarded PUT and DELETE with 412, as after a concurrent edit. */
+  staleOnWrite?: boolean;
+  /**
+   * Answer a request with this status (and body) instead of handling it.
+   * Called for every request; return `undefined` to let the fake proceed.
+   */
+  failWhen?: (
+    method: string,
+    url: string,
+    index: number
+  ) =>
+    | { status: number; body?: string; headers?: Record<string, string> }
+    | undefined;
+  /** The href the principal PROPFIND answers with, instead of `/tester/`. */
+  principalHref?: string;
+  /** Extra `<D:response>` hrefs listed as children of the home, verbatim. */
+  extraHomeChildren?: string[];
 }
 
 export class FakeCardDav {
@@ -94,7 +115,17 @@ export class FakeCardDav {
     string,
     { entry: FakeBook; resources: Map<string, Stored> }
   >();
-  readonly requests: { method: string; url: string; body?: string }[] = [];
+  /**
+   * Every request, with its headers. The headers are what a write guard *is*:
+   * a test that only looks at the URL of a PUT cannot tell a guarded write from
+   * an unguarded one, and the fake used to accept both.
+   */
+  readonly requests: {
+    method: string;
+    url: string;
+    headers: Record<string, string>;
+    body?: string;
+  }[] = [];
   private sequence = 0;
   private syncCounter = 0;
 
@@ -118,7 +149,9 @@ export class FakeCardDav {
 
   private nextEtag(): string {
     this.sequence += 1;
-    return `"etag-${this.sequence}"`;
+    const shape = this.options.etagShape ?? '"etag-%d"';
+    const strong = shape.replace('%d', String(this.sequence));
+    return this.options.weakEtags === true ? `W/${strong}` : strong;
   }
 
   /** Puts a card in a book without going through the server under test. */
@@ -203,14 +236,25 @@ export class FakeCardDav {
     const method = (init.method ?? 'GET').toUpperCase();
     const body = typeof init.body === 'string' ? init.body : undefined;
     const path = new URL(url).pathname;
+    const headers = { ...((init.headers ?? {}) as Record<string, string>) };
     this.requests.push({
       method,
       url,
+      headers,
       ...(body === undefined ? {} : { body }),
     });
 
     if (new URL(url).origin !== ORIGIN) {
       throw new Error(`the fake was asked for ${url}, which is another origin`);
+    }
+
+    const scripted = this.options.failWhen?.(
+      method,
+      url,
+      this.requests.length - 1
+    );
+    if (scripted !== undefined) {
+      return this.reply(scripted.status, scripted.body ?? '', scripted.headers);
     }
 
     // A transient outage: the first `failNext` requests answer 503, everything
@@ -246,10 +290,27 @@ export class FakeCardDav {
     if (path === '/' && body.includes('current-user-principal')) {
       const cup = this.tag('D:current-user-principal');
       const h = this.tag('D:href');
+      const principal = this.options.principalHref ?? `/${USER}/`;
       return this.reply(
         207,
         this.envelope(
-          this.response('/', `<${cup}><${h}>/${USER}/</${h}></${cup}>`)
+          this.response('/', `<${cup}><${h}>${principal}</${h}></${cup}>`)
+        )
+      );
+    }
+    if (
+      this.options.principalHref !== undefined &&
+      path === new URL(this.options.principalHref, ORIGIN).pathname &&
+      body.includes('addressbook-home-set')
+    ) {
+      // A hostile principal href still has to lead somewhere, or discovery
+      // falls back to the root and the hostile string never reaches a result.
+      const home = this.card('addressbook-home-set');
+      const h = this.tag('D:href');
+      return this.reply(
+        207,
+        this.envelope(
+          this.response(path, `<${home}><${h}>/${USER}/</${h}></${home}>`)
         )
       );
     }
@@ -280,6 +341,9 @@ export class FakeCardDav {
             this.bookResponse(bookPath, { ...store.entry, readOnly: true })
           );
         }
+      }
+      for (const href of this.options.extraHomeChildren ?? []) {
+        parts.push(this.bookResponse(href, { name: 'extra' }));
       }
       return this.reply(207, this.envelope(parts.join('')));
     }
@@ -496,11 +560,21 @@ export class FakeCardDav {
     const headers = (init.headers ?? {}) as Record<string, string>;
     const existing = found.store.get(found.name);
 
+    // A PUT with neither guard is one this server never sends, and a fake
+    // that accepted it would keep every write test green through a regression
+    // that dropped the guard. 428 Precondition Required is what RFC 6585 says.
+    if (
+      headers['If-None-Match'] === undefined &&
+      headers['If-Match'] === undefined
+    ) {
+      return this.reply(428, 'a PUT without If-Match or If-None-Match');
+    }
     if (headers['If-None-Match'] === '*' && existing !== undefined) {
       return this.reply(412, 'exists');
     }
     if (headers['If-Match'] !== undefined) {
       if (existing === undefined) return this.reply(404, 'not found');
+      if (this.options.staleOnWrite === true) return this.reply(412, 'stale');
       if (headers['If-Match'] !== existing.etag) {
         return this.reply(412, 'stale');
       }
@@ -517,8 +591,11 @@ export class FakeCardDav {
       return this.reply(404, 'not found');
     }
     const headers = (init.headers ?? {}) as Record<string, string>;
+    if (headers['If-Match'] === undefined) {
+      return this.reply(428, 'a DELETE without If-Match');
+    }
     if (
-      headers['If-Match'] !== undefined &&
+      this.options.staleOnWrite === true ||
       headers['If-Match'] !== existing.etag
     ) {
       return this.reply(412, 'stale');
@@ -680,6 +757,23 @@ export function dataOf(result: unknown): Record<string, unknown> {
     JSON.parse(last),
     'the JSON text block and structuredContent disagree'
   ).toEqual(structured);
+  return structured as Record<string, unknown>;
+}
+
+/**
+ * The structured half of the one result whose channels differ on purpose.
+ *
+ * `export_contacts` carries the stored bytes in `structuredContent` and a
+ * defused rendering in the text block — see `exportResult`. `dataOf` would
+ * report the two as disagreeing, which is the point of that tool, so the
+ * export suites read the structured half directly and assert on the text
+ * block separately.
+ */
+export function exportOf(result: unknown): Record<string, unknown> {
+  const structured = (result as { structuredContent?: unknown })
+    .structuredContent;
+  expect(structured, 'result carried no structuredContent').toBeDefined();
+  expect(textOf(result)).toContain('byte-exact export is in structuredContent');
   return structured as Record<string, unknown>;
 }
 

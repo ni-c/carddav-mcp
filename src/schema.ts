@@ -120,11 +120,28 @@ export const addressInput = z.object({
  * that demanded a year would force the caller to invent one. See `formatDate`
  * in `vcard.ts` for what a yearless date becomes in each vCard version.
  */
-export const dateInput = z.object({
-  year: z.number().int().min(1).max(9999).optional(),
-  month: z.number().int().min(1).max(12),
-  day: z.number().int().min(1).max(31),
-});
+export const dateInput = z
+  .object({
+    year: z.number().int().min(1).max(9999).optional(),
+    month: z.number().int().min(1).max(12),
+    day: z.number().int().min(1).max(31),
+  })
+  // `month ≤ 12` and `day ≤ 31` checked apart let `BDAY:20260231` through.
+  // Without a year the 29th of February is allowed: the year is unknown, and
+  // it may well have been a leap year.
+  .refine(
+    ({ year, month, day }) => day <= daysInMonth(month, year),
+    'is not a date that exists'
+  );
+
+function daysInMonth(month: number, year: number | undefined): number {
+  if (month === 2) {
+    if (year === undefined) return 29;
+    const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+    return leap ? 29 : 28;
+  }
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
 
 /**
  * A whole vCard, for the cases the structured fields do not cover.
@@ -139,6 +156,13 @@ export const rawVCard = z
   .string()
   .min(1)
   .max(256 * 1024)
+  // Line breaks are structure in a vCard and stay; everything else in the
+  // control range — NUL, ESC, the C1 block — was the one exception to the
+  // rule at the top of this file, and went out in a PUT verbatim.
+  .refine(
+    (value) => !hasControlCharacters(value, { allowNewlines: true }),
+    'must not contain control characters other than line breaks'
+  )
   .describe(
     'A complete vCard, for properties the named fields do not cover. On ' +
       'update this replaces the whole card rather than merging into it.'

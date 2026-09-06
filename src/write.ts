@@ -1,16 +1,21 @@
 import { createHash } from 'node:crypto';
 
+import { setResourceKey } from 'mcp-approval';
+
 import type { CardDavApi } from './api.js';
 import { resourceUrl, type AddressBookEntry } from './books.js';
 import { PreconditionFailedError, ToolInputError } from './errors.js';
 import {
   DEFAULT_VERSION,
+  foldNewlines,
   formatDate,
   ICAL,
+  isGroup,
   newUid,
   newVCard,
   parseVCard,
   readStructured,
+  readText,
   resourceNameFor,
   serializeVCard,
   touch,
@@ -182,6 +187,32 @@ export function keyPart(value: string | null | undefined): string {
   return `s:${value}`;
 }
 
+/**
+ * A resource key whose parts are bound to their *positions*.
+ *
+ * `setResourceKey` sorts its targets before hashing — it is written for sets,
+ * where `["5","12"]` and `["12","5"]` are the same thing. The keys here are
+ * tuples, and sorting a tuple throws its positions away: `update_group` put
+ * `keyPart(name)` and `keyPart(note)` in the same list, both spelled
+ * `s:<text>`, so a token issued for `{name: "Team", note: "internal"}` also
+ * executed `{name: "internal", note: "Team"}`; `move_contact` put the source
+ * and the destination in one list, so an approval to move a card from Work to
+ * Private also authorised moving a card of the same name from Private to
+ * Work. Each part is prefixed with its index and a NUL, which no part can
+ * contain (`schema.ts` refuses control characters on the way in, and a path
+ * with a NUL never leaves `entity-id.ts`), so two different tuples cannot
+ * sort into the same set.
+ */
+export function orderedResourceKey(
+  operation: string,
+  parts: readonly string[]
+): string {
+  return setResourceKey(
+    operation,
+    parts.map((part, index) => `${index}\u0000${part}`)
+  );
+}
+
 /** How many properties a write touches, for the approval dialog. */
 export function changedFieldNames(fields: ContactFields): string[] {
   return CONTACT_FIELD_KEYS.filter((key) => fields[key] !== undefined);
@@ -305,6 +336,10 @@ function writeAddress(card: ICAL.Component, address: AddressInput): void {
   if (address.type !== undefined && address.type.trim().length > 0) {
     prop.setParameter('type', address.type.trim().toUpperCase());
   }
+  // Folded like every other writer. The schema already refuses a control
+  // character in an address component, so this is symmetry rather than a
+  // fix — the one serialiser that did not fold was the one a reader had to
+  // reason about separately.
   prop.setValues([
     [
       address.po_box ?? '',
@@ -314,7 +349,7 @@ function writeAddress(card: ICAL.Component, address: AddressInput): void {
       address.region ?? '',
       address.postal_code ?? '',
       address.country ?? '',
-    ],
+    ].map((part) => foldNewlines(part)),
   ] as never);
   card.addProperty(prop);
 }
@@ -341,10 +376,7 @@ export function versionFor(book: AddressBookEntry): VCardVersion {
  * than storing a nameless entry that every client shows as a blank row.
  */
 export function ensureFormattedName(card: ICAL.Component): void {
-  const existing = card.getFirstPropertyValue('fn');
-  if (existing !== null && existing !== undefined && String(existing).trim()) {
-    return;
-  }
+  if (readText(card, 'fn') !== undefined) return;
   const [family, given, additional, prefix, suffix] = structuredNameOf(card);
   const derived = [prefix, given, additional, family, suffix]
     .map((part) => (part ?? '').trim())
@@ -390,8 +422,10 @@ export async function createCard(
 ): Promise<{ resourceName: string; etag: string | undefined; uid: string }> {
   assertWritable(book);
   ensureFormattedName(card);
-  const uid =
-    String(card.getFirstPropertyValue('uid') ?? '').trim() || newUid();
+  // Kept where the card has one: a pasted export keeps its identity, which is
+  // what makes an import round-trip rather than duplicate. SECURITY.md says
+  // so; `memberIndex` reports the collision a reused UID can cause.
+  const uid = readText(card, 'uid') ?? newUid();
   card.updatePropertyWithValue('uid', uid);
   touch(card);
   const vcf = serializeVCard(card);
@@ -462,6 +496,17 @@ export async function deleteCard(
  */
 export function cardFromRaw(raw: string): ICAL.Component {
   const card = parseVCard(raw, 'the raw_vcard argument');
+  // A group card is not a contact, and the two tools that take `raw_vcard`
+  // are contact tools: `create_contact` would otherwise create a group past
+  // `create_group`'s convention choice, and `update_contact` would turn a
+  // contact into a group under a dialog that said "replace a contact card".
+  if (isGroup(card)) {
+    throw new ToolInputError(
+      'carddav-mcp: raw_vcard is a group card (KIND:group or ' +
+        'X-ADDRESSBOOKSERVER-KIND:group), and this tool writes contacts. ' +
+        'Use create_group or update_group for a group.'
+    );
+  }
   ensureFormattedName(card);
   return card;
 }

@@ -38,17 +38,17 @@ async function names(
   const { tools } = await session.client.listTools();
   await session.close();
   session = undefined;
-  return tools.map((tool) => tool.name).sort();
+  return tools.map((tool) => tool.name).toSorted();
 }
 
 describe('the catalogue', () => {
   it('is exactly the set of tools the server registers', async () => {
-    expect(await names()).toEqual([...ALL_TOOLS].sort());
+    expect(await names()).toEqual([...ALL_TOOLS].toSorted());
   });
 
   it('splits into read and write with no overlap', () => {
-    expect([...READ_TOOLS, ...WRITE_TOOLS].sort()).toEqual(
-      [...ALL_TOOLS].sort()
+    expect([...READ_TOOLS, ...WRITE_TOOLS].toSorted()).toEqual(
+      [...ALL_TOOLS].toSorted()
     );
     for (const tool of READ_TOOLS) {
       expect(WRITE_TOOLS as readonly string[]).not.toContain(tool);
@@ -82,7 +82,7 @@ describe('the catalogue', () => {
 describe('selecting tools', () => {
   it('registers the preset for essential', async () => {
     expect(await names({ allowTools: 'essential' })).toEqual(
-      [...ESSENTIAL_TOOLS].sort()
+      [...ESSENTIAL_TOOLS].toSorted()
     );
   });
 
@@ -114,11 +114,11 @@ describe('selecting tools', () => {
   });
 });
 
-describe('refusing an unusable list', () => {
-  function build(config: Parameters<typeof testConfig>[0]): () => void {
-    return () => createServer(testConfig(config));
-  }
+function build(config: Parameters<typeof testConfig>[0]): () => void {
+  return () => createServer(testConfig(config));
+}
 
+describe('refusing an unusable list', () => {
   it('names the valid tools when an entry matches nothing', () => {
     expect(build({ allowTools: 'delete_thing' })).toThrow(ToolFilterError);
     expect(build({ allowTools: 'delete_thing' })).toThrow(/delete_contact/);
@@ -151,13 +151,13 @@ describe('refusing an unusable list', () => {
 
 describe('together with read-only mode', () => {
   it('registers exactly the read tools', async () => {
-    expect(await names({ readOnly: true })).toEqual([...READ_TOOLS].sort());
+    expect(await names({ readOnly: true })).toEqual([...READ_TOOLS].toSorted());
   });
 
   it('narrows the preset to its read half', async () => {
     const expected = ESSENTIAL_TOOLS.filter((tool) =>
       (READ_TOOLS as readonly string[]).includes(tool)
-    ).sort();
+    ).toSorted();
     expect(await names({ readOnly: true, allowTools: 'essential' })).toEqual(
       expected
     );
@@ -180,7 +180,7 @@ describe('together with read-only mode', () => {
   it('leaves deny exempt from the write-tool rule', async () => {
     expect(
       await names({ readOnly: true, denyTools: 'delete_contact' })
-    ).toEqual([...READ_TOOLS].sort());
+    ).toEqual([...READ_TOOLS].toSorted());
   });
 });
 

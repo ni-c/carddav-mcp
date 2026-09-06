@@ -6,6 +6,7 @@ import {
   call,
   connect,
   dataOf,
+  exportOf,
   FakeCardDav,
   ORIGIN,
   testConfig,
@@ -248,11 +249,16 @@ describe('the response budget', () => {
       address_book: 'work',
       limit: 400,
     });
-    const data = dataOf(result);
+    const data = exportOf(result);
     expect(Array.isArray(data.vcards)).toBe(true);
     expect(JSON.stringify(data.notes)).toContain('to keep the answer under');
-    // Still valid JSON in both channels — which `dataOf` has already proven by
-    // parsing the text block and comparing it.
+    // The text channel is a rendering of exactly the entries that survived,
+    // and says what was dropped — see `exportResult`.
+    const text = textOf(result);
+    expect(text).toContain('to keep the answer under');
+    expect(text.match(/\| --- c1\./g)).toHaveLength(
+      (data.vcards as unknown[]).length
+    );
   });
 });
 

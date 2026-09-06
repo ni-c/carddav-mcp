@@ -213,10 +213,26 @@ export function hasControlCharacters(
  * `Work` they know.
  */
 export function escapeInvisible(input: string): string {
-  const escape = (match: string): string =>
-    `\\u${(match.codePointAt(0) as number).toString(16).padStart(4, '0')}`;
-  return input.replace(INVISIBLE_CHARS, escape).replace(CONTROL_CHARS, escape);
+  return input
+    .replace(INVISIBLE_CHARS, unicodeEscape)
+    .replace(CONTROL_CHARS, unicodeEscape);
 }
+
+function unicodeEscape(match: string): string {
+  return `\\u${(match.codePointAt(0) as number).toString(16).padStart(4, '0')}`;
+}
+
+/**
+ * How much of an input the sanitisers look at, as a multiple of their cap.
+ *
+ * `defuseAutoFetch` replaces two characters with thirty-one, and it ran on the
+ * whole input before the cap was applied — so a 16 MiB multistatus of `![` in
+ * `FN` fields allocated a quarter of a gigabyte on its way to four hundred
+ * characters. Eight times the cap leaves room for every replacement to expand
+ * and for the whitespace collapse to shrink, and nothing past it could have
+ * survived the cut anyway.
+ */
+const PRE_CUT_FACTOR = 8;
 
 /**
  * A caller's or a server's value, made safe to quote inside an error message.
@@ -311,7 +327,9 @@ export function defuseAutoFetch(text: string): string {
  * would miss it.
  */
 export function sanitizeText(input: string, maxChars = MAX_TEXT_CHARS): string {
-  const normalized = defuseAutoFetch(stripInvisible(input.normalize('NFKC')))
+  const normalized = defuseAutoFetch(
+    stripInvisible(input.normalize('NFKC')).slice(0, maxChars * PRE_CUT_FACTOR)
+  )
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -341,7 +359,9 @@ export function sanitizeShortText(
   input: string,
   maxChars = MAX_SHORT_TEXT_CHARS
 ): string {
-  const normalized = defuseAutoFetch(stripInvisible(input.normalize('NFKC')))
+  const normalized = defuseAutoFetch(
+    stripInvisible(input.normalize('NFKC')).slice(0, maxChars * PRE_CUT_FACTOR)
+  )
     .replace(/\s+/g, ' ')
     .trim();
   return normalized.length > maxChars

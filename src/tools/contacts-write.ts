@@ -1,12 +1,8 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import {
-  setResourceKey,
-  type Approver,
-  type ConfirmationStore,
-} from 'mcp-approval';
+import type { Approver, ConfirmationStore } from 'mcp-approval';
 
-import { escapeInvisible } from '../analyze.js';
+import { escapeInvisible, sanitizeShortText } from '../analyze.js';
 import { notes, shapedContact, untrustedFields } from '../output-schema.js';
 import {
   errorResult,
@@ -27,7 +23,7 @@ import {
   typedInput,
 } from '../schema.js';
 import { assertNotGroup } from '../groups.js';
-import { isGroup } from '../vcard.js';
+import { readText } from '../vcard.js';
 import {
   applyFields,
   blankCard,
@@ -37,6 +33,7 @@ import {
   createCard,
   deleteCard,
   hasAnyField,
+  orderedResourceKey,
   replaceCard,
   textDigest,
   type ContactFields,
@@ -214,6 +211,13 @@ export function registerContactWriteTools(
         // exists rather than what the id claims about it.
         const loaded = await loadById(context, registry, args.id, true);
         assertNotGroup(loaded.card, 'update_contact');
+        // Parsed before anybody is asked: a raw card that does not parse, or
+        // that turns out to be a group, is refused without spending a dialog
+        // on it — and the person is asked about the card that will be written.
+        const replacement =
+          args.raw_vcard === undefined
+            ? undefined
+            : cardFromRaw(args.raw_vcard);
 
         const changed =
           args.raw_vcard === undefined
@@ -235,7 +239,7 @@ export function registerContactWriteTools(
                 ? ''
                 : ' Every property not in the new card is removed, including ' +
                   'any photo.'),
-            resourceKey: setResourceKey('update_contact', [
+            resourceKey: orderedResourceKey('update_contact', [
               loaded.entity.bookPath,
               loaded.entity.resourceName,
               args.raw_vcard === undefined
@@ -265,17 +269,17 @@ export function registerContactWriteTools(
 
         let collected: string[] = [];
         let card = loaded.card;
-        if (args.raw_vcard === undefined) {
+        if (replacement === undefined) {
           collected = applyFields(card, fields).notes;
         } else {
-          card = cardFromRaw(args.raw_vcard);
+          card = replacement;
           // The UID is the card's identity in every group that references it,
           // so a replacement keeps the one already stored rather than the one
           // the caller happened to paste. Otherwise every group naming this
           // person quietly loses them.
-          const uid = loaded.card.getFirstPropertyValue('uid');
-          if (uid !== null && uid !== undefined) {
-            card.updatePropertyWithValue('uid', String(uid));
+          const uid = readText(loaded.card, 'uid');
+          if (uid !== undefined) {
+            card.updatePropertyWithValue('uid', uid);
             collected.push(
               'The stored UID was kept rather than the one in raw_vcard, so ' +
                 'any group referring to this contact still finds it.'
@@ -327,22 +331,23 @@ export function registerContactWriteTools(
       run(async () => {
         const { registry } = await resolveBooks(context);
         const loaded = await loadById(context, registry, args.id, true);
-        const group = isGroup(loaded.card);
+        // A group is refused here, as `update_contact` and `move_contact`
+        // refuse one. This tool used to delete a group card too, with an
+        // honest dialog — and that made `delete_group` a capability that
+        // `CARDDAV_DENY_TOOLS=delete_group` did not remove, because the
+        // catalogue lists the two as separable and they were not.
+        assertNotGroup(loaded.card, 'delete_contact');
 
         const outcome = await approval.requestApproval(
           server,
           mcp,
           confirmations,
           {
-            what: group
-              ? 'delete a group card'
-              : 'permanently delete a contact',
-            consequence: group
-              ? 'The contacts in the group are not touched, but the grouping ' +
-                'itself is gone and cannot be recovered from here.'
-              : 'A CardDAV server has no trash. The card cannot be recovered ' +
-                'from here.',
-            resourceKey: setResourceKey('delete_contact', [
+            what: 'permanently delete a contact',
+            consequence:
+              'A CardDAV server has no trash. The card cannot be recovered ' +
+              'from here.',
+            resourceKey: orderedResourceKey('delete_contact', [
               loaded.entity.bookPath,
               loaded.entity.resourceName,
             ]),
@@ -375,7 +380,9 @@ export function registerContactWriteTools(
         return ownWordsResult({
           deleted: true as const,
           id: args.id,
-          address_book: loaded.book.path,
+          // Own words, no untrusted marker: the path is the server's string
+          // and is cleaned like every other one that lands in such an answer.
+          address_book: sanitizeShortText(loaded.book.path),
         });
       })
   );
@@ -409,6 +416,10 @@ export function registerContactWriteTools(
       run(async () => {
         const { registry } = await resolveBooks(context);
         const loaded = await loadById(context, registry, args.id, true);
+        // Membership is stored as UIDs and resolved only within the group's
+        // own book, so a group moved elsewhere arrives with every member
+        // unresolvable — under a dialog that said "move a contact".
+        assertNotGroup(loaded.card, 'move_contact');
         const destination = registry.resolve(args.destination);
 
         if (destination.path === loaded.book.path) {
@@ -435,7 +446,10 @@ export function registerContactWriteTools(
               'The card is copied and then the original is deleted, with no ' +
               'transaction around the pair. Its id changes, so any id held ' +
               'from an earlier listing stops working.',
-            resourceKey: setResourceKey('move_contact', [
+            // Ordered: with a set, an approval to move `x.vcf` from Work to
+            // Private also authorised moving a card of that name from Private
+            // to Work.
+            resourceKey: orderedResourceKey('move_contact', [
               loaded.entity.bookPath,
               loaded.entity.resourceName,
               destination.path,
