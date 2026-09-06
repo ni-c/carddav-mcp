@@ -30,19 +30,23 @@ RUN apk add --no-cache --upgrade libcrypto3 libssl3
 
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-# The server reports its version from package.json at runtime.
-COPY package.json package-lock.json ./
+# The server reports its version from package.json at runtime. The lockfile is
+# not copied: nothing reads it here, and it is an inventory of the dependency
+# tree in an image whose package managers are removed below.
+COPY package.json ./
 
 # The base image's bundled package managers are a frequent source of HIGH
 # findings and this image never installs anything — remove them rather than
 # carrying their CVEs. corepack goes with npm for the same reason: it is a
-# package-manager shim in an image whose entrypoint is plain `node`.
+# package-manager shim in an image whose entrypoint is plain `node`, and so
+# is yarn, which the base image also ships.
 #
 # This does not shrink the image — the files stay in the base layer — but it
 # removes them from the final filesystem, which is what Trivy scans and what a
 # process in the container can reach.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
-    /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+    /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+    /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-v*
 
 # Ownership proof for the MCP Registry: must match server.json's name exactly.
 LABEL io.modelcontextprotocol.server.name="io.github.ni-c/carddav-mcp"

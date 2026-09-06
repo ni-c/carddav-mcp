@@ -156,11 +156,16 @@ describe('credential redaction', () => {
         fc.stringMatching(/^[A-Za-z0-9]{3,10}$/),
         fc.stringMatching(/^[a-z]{3,12}(\.[a-z]{2,6})+$/),
         (user, head, tail, host) => {
-          fc.pre(!host.includes(head) && !host.includes(tail));
+          // The fragment must not occur in what legitimately survives — the
+          // host, and the fixed `https://***@…/dav` around it: a password of
+          // `htt` is a substring of `https`, and the property is about the
+          // redaction, not about the alphabet.
+          const expected = `https://***@${host}/dav`;
+          fc.pre(!expected.includes(head) && !expected.includes(tail));
           const redacted = redactUrlCredentials(
             `https://${user}:${head}@${tail}@${host}/dav`
           );
-          expect(redacted).toBe(`https://***@${host}/dav`);
+          expect(redacted).toBe(expected);
           expect(redacted).not.toContain(head);
           expect(redacted).not.toContain(tail);
         }

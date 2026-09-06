@@ -369,7 +369,11 @@ describe('delete_contact', () => {
     expect(fake.names('work')).toHaveLength(0);
   });
 
-  it('says a group is a group in the dialog', async () => {
+  it('refuses a group, before anybody is asked', async () => {
+    // It used to delete a group card too, with an honest dialog — which made
+    // `delete_group` a capability that `CARDDAV_DENY_TOOLS=delete_group` did
+    // not remove. Refused like `update_contact` refuses one, and refused
+    // before the dialog so no approval is spent on a call that cannot run.
     await open('accept');
     fake.seed(
       'work',
@@ -382,8 +386,10 @@ describe('delete_contact', () => {
     );
     const groups = dataOf(await call(session, 'list_groups'));
     const [team] = groups.groups as Record<string, unknown>[];
-    await call(session, 'delete_contact', { id: team?.id });
-    expect(session.prompts[0]).toContain('group card');
+    const result = await call(session, 'delete_contact', { id: team?.id });
+    expect(textOf(result)).toContain('names a group, not a contact');
+    expect(session.prompts).toHaveLength(0);
+    expect(fake.names('work')).toContain('team.vcf');
   });
 });
 

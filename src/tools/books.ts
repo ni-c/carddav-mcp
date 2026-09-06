@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 
+import { sanitizeShortText } from '../analyze.js';
+import { describeAllowlistEntry, MAX_ADDRESS_BOOKS } from '../books.js';
 import { addressbookQueryBody, syncCollectionBody } from '../dav-xml.js';
 import { notes, shapedAddressBook, untrustedFields } from '../output-schema.js';
 import { ownWordsResult, run, untrustedResult } from '../result.js';
@@ -18,6 +20,12 @@ import type { ToolContext } from './common.js';
  * that silently omits books teaches the reader they do not exist — and then a
  * perfectly correct id from another source looks like a bug.
  */
+/** Cap on a server-chosen URL shown for information. */
+const MAX_URL_CHARS = 512;
+
+/** How many home sets `get_server_info` lists. Real accounts have one. */
+const MAX_HOMES = 16;
+
 export function registerBookTools(
   server: McpServer,
   context: ToolContext
@@ -55,11 +63,22 @@ export function registerBookTools(
 
         const collected = [...principal.notes];
         if (unmatched.length > 0) {
+          // Described, not quoted: this note reaches the model, and an entry
+          // that matches nothing is what a pasted credential looks like.
           collected.push(
             `CARDDAV_ADDRESSBOOKS names ${unmatched.length} entr` +
               `${unmatched.length === 1 ? 'y' : 'ies'} that match no address ` +
-              `book: ${unmatched.join(', ')}. Check the spelling — an entry ` +
-              'that matches nothing narrows this server for no reason.'
+              `book: ${unmatched.map(describeAllowlistEntry).join(', ')}. ` +
+              'Check the spelling — an entry that matches nothing narrows ' +
+              'this server for no reason.'
+          );
+        }
+        if (registry.truncated > 0) {
+          collected.push(
+            `The server reported ${registry.truncated} more address book(s) ` +
+              `than the ${MAX_ADDRESS_BOOKS} this server keeps; they are not ` +
+              'listed and cannot be addressed. Narrow the account, or name ' +
+              'the books that matter in CARDDAV_ADDRESSBOOKS.'
           );
         }
 
@@ -86,7 +105,10 @@ export function registerBookTools(
       annotations: READ_ONLY,
       // No untrusted marker: every field here is either a protocol token or
       // this server's own probe result. A marker on everything is a marker on
-      // nothing.
+      // nothing. That only holds if the two fields that are *not* tokens —
+      // the principal and home URLs, which are hrefs the server chose — are
+      // cleaned like the header tokens are: a path segment of
+      // `![leak](https://attacker/x.png)` survives `new URL()` intact.
       outputSchema: z.object({
         url: z.string(),
         principal: z.string().optional(),
@@ -161,8 +183,12 @@ export function registerBookTools(
 
         return ownWordsResult({
           url: context.api.url,
-          ...(principal.url === undefined ? {} : { principal: principal.url }),
-          homes: [...principal.homes],
+          ...(principal.url === undefined
+            ? {}
+            : { principal: sanitizeShortText(principal.url, MAX_URL_CHARS) }),
+          homes: principal.homes
+            .slice(0, MAX_HOMES)
+            .map((home) => sanitizeShortText(home, MAX_URL_CHARS)),
           dav_compliance: dav,
           allowed_methods: allow,
           address_book_count: allowed.length,

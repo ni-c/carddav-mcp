@@ -1,18 +1,15 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import {
-  setResourceKey,
-  type Approver,
-  type ConfirmationStore,
-} from 'mcp-approval';
+import type { Approver, ConfirmationStore } from 'mcp-approval';
 
-import { escapeInvisible } from '../analyze.js';
+import { escapeInvisible, sanitizeShortText } from '../analyze.js';
 import { MAX_MAX_ENTRIES } from '../config.js';
 import { boundedLimit } from '../entries.js';
 import { parseEntityId } from '../entity-id.js';
 import type { AddressBookRegistry } from '../books.js';
 import {
   assertGroup,
+  duplicateUidNote,
   listGroups,
   memberIndex,
   modelFor,
@@ -47,6 +44,7 @@ import {
   createCard,
   deleteCard,
   keyPart,
+  orderedResourceKey,
   replaceCard,
 } from '../write.js';
 import { CREATE, DELETE, READ_ONLY, REPLACE } from './annotations.js';
@@ -168,7 +166,10 @@ export function registerGroupReadTools(
         const { registry } = await resolveBooks(context);
         const loaded = await loadById(context, registry, args.id);
         assertGroup(loaded.card, 'get_group');
-        const index = await memberIndex(context.api, loaded.book);
+        const { index, duplicates } = await memberIndex(
+          context.api,
+          loaded.book
+        );
 
         const shaped = shapeGroup(
           loaded.card,
@@ -183,6 +184,7 @@ export function registerGroupReadTools(
         ).length;
 
         const collected: string[] = [];
+        if (duplicates > 0) collected.push(duplicateUidNote(duplicates));
         if (unresolved > 0) {
           collected.push(
             `${unresolved} member(s) could not be resolved in this address ` +
@@ -255,7 +257,7 @@ export function registerGroupWriteTools(
           card.updatePropertyWithValue('note', args.note);
         }
 
-        const index = await memberIndex(context.api, book);
+        const { index, duplicates } = await memberIndex(context.api, book);
         const { uids, missing } = resolveMembers(
           registry,
           book.path,
@@ -285,6 +287,7 @@ export function registerGroupWriteTools(
               'book it lives in.'
           );
         }
+        if (duplicates > 0) collected.push(duplicateUidNote(duplicates));
 
         return untrustedResult({
           group: shapeGroup(card, book, resourceName, etag, (uid) =>
@@ -357,7 +360,10 @@ export function registerGroupWriteTools(
         const { registry } = await resolveBooks(context);
         const loaded = await loadById(context, registry, args.id, true);
         const model = assertGroup(loaded.card, 'update_group');
-        const index = await memberIndex(context.api, loaded.book);
+        const { index, duplicates } = await memberIndex(
+          context.api,
+          loaded.book
+        );
 
         const current = membersOf(loaded.card)
           .map((reference) => memberUid(reference))
@@ -400,12 +406,18 @@ export function registerGroupWriteTools(
               'A CardDAV server keeps no version history, so the previous ' +
               'name, note and membership cannot be recovered from here. The ' +
               'contacts themselves are not deleted.',
-            resourceKey: setResourceKey('update_group', [
+            // Ordered, not a set: `keyPart(name)` and `keyPart(note)` are both
+            // spelled `s:<text>`, and under `setResourceKey`'s sort a token
+            // for `{name: "Team", note: "internal"}` also executed
+            // `{name: "internal", note: "Team"}`.
+            resourceKey: orderedResourceKey('update_group', [
               loaded.entity.bookPath,
               loaded.entity.resourceName,
               // The exact membership the write would produce, so a token
-              // issued for one change cannot execute a different one.
-              [...next].sort().join(','),
+              // issued for one change cannot execute a different one. As a
+              // JSON array rather than joined: a UID is a string the card
+              // chose and may contain the separator.
+              JSON.stringify(next.toSorted()),
               // Three states, three distinct spellings. `undefined` used to
               // encode as the empty string and `null` as `' null'`, which made
               // "leave the name alone" and "set the name to empty" the same
@@ -466,6 +478,7 @@ export function registerGroupWriteTools(
               'it lives in.'
           );
         }
+        if (duplicates > 0) collected.push(duplicateUidNote(duplicates));
 
         return untrustedResult({
           group: shapeGroup(
@@ -522,7 +535,7 @@ export function registerGroupWriteTools(
               'The contacts stay in the address book; only the grouping is ' +
               'removed. A CardDAV server has no trash, so the group cannot be ' +
               'recovered from here.',
-            resourceKey: setResourceKey('delete_group', [
+            resourceKey: orderedResourceKey('delete_group', [
               loaded.entity.bookPath,
               loaded.entity.resourceName,
             ]),
@@ -556,7 +569,10 @@ export function registerGroupWriteTools(
         return ownWordsResult({
           deleted: true as const,
           id: args.id,
-          address_book: loaded.book.path,
+          // This server's own words carry no untrusted marker, and the path is
+          // the server's string — cleaned, like every other server string
+          // that lands in an unmarked answer.
+          address_book: sanitizeShortText(loaded.book.path),
           members_released: count,
         });
       })

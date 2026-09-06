@@ -33,6 +33,18 @@ resolves ids and would otherwise be the one place a fenced-off path could be nam
 A listing reports how many collections it withheld rather than quietly showing a
 shorter list.
 
+The fence is keyed on the collection **path**, and the path is a string the CardDAV
+server chose: discovery reads it out of the server's own `<D:href>`. The origin is
+pinned and a collection has to sit under the home it was listed from, but a server
+that presents any collection under a permitted path is a server that already holds
+every card in it. `CARDDAV_ADDRESSBOOKS` bounds what _this server_ touches on a
+cooperating backend; it is not a defence against a hostile one, and nothing here
+claims to be. The same applies to `read_only`, which is what the server reported in
+`current-user-privilege-set`. An entry that matches nothing is described by its
+shape and length rather than quoted — the variable sits one line below the password
+in every compose file, and an entry that matches nothing is exactly what a credential
+pasted there looks like.
+
 Destructive operations **ask a person** through MCP elicitation: a dialog raised by
 the server and shown by the client, which the model cannot answer on its behalf, and
 which nothing proceeds without. Where the client cannot show one they fall back to a
@@ -203,8 +215,21 @@ path never accepts one — it issues its own `GET` every time.
 Never `If-Match: *` — that is the absence of the safeguard wearing its clothes. A
 weak ETag cannot protect a write under RFC 9110 and is refused with a reason.
 
-`create_contact` generates the UID and the resource name itself and sends
-`If-None-Match: *`, so a caller never chooses a path — which removes traversal and
-accidental overwriting in one move. Where a raw card replaces an existing one, the
-**stored** UID is kept rather than the pasted one, because the UID is what every
-group naming that person refers to.
+`create_contact` generates the resource name itself and sends `If-None-Match: *`,
+so a caller never chooses a path — which removes traversal and accidental
+overwriting in one move. The UID is generated too unless a `raw_vcard` brings its
+own: a pasted export keeps its identity, which is what makes an import round-trip
+rather than duplicate. That means a caller _can_ reuse a UID another card already
+carries, and membership is stored by UID — so `get_group` reports how many cards in
+the book share one and resolves the first the server listed, rather than quietly
+re-pointing a member at whichever card came last. Where a raw card replaces an
+existing one, the **stored** UID is kept rather than the pasted one, for the same
+reason.
+
+A `raw_vcard` that is a group card (`KIND:group` or `X-ADDRESSBOOKSERVER-KIND`) is
+refused by both contact tools: `create_contact` would otherwise create a group past
+`create_group`'s convention choice, and `update_contact` would turn a contact into
+a group under a dialog that said "replace a contact card". `delete_contact` and
+`move_contact` refuse a group id the same way `update_contact` does — the group
+tools are separable in `CARDDAV_ALLOW_TOOLS` and `CARDDAV_DENY_TOOLS` only if no
+contact tool can reach a group.

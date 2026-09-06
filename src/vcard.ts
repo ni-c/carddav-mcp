@@ -109,8 +109,7 @@ export function serializeVCard(card: ICAL.Component): string {
  * absence is evidence against 4.0.
  */
 export function versionOf(card: ICAL.Component): VCardVersion {
-  const raw = card.getFirstPropertyValue('version');
-  return String(raw ?? '') === '4.0' ? '4.0' : '3.0';
+  return readText(card, 'version') === '4.0' ? '4.0' : '3.0';
 }
 
 /**
@@ -351,17 +350,14 @@ export function readDate(
     month?: number | null;
     day?: number | null;
   };
-  const numeric = (part: number | null | undefined): number | undefined =>
-    typeof part === 'number' && Number.isFinite(part) ? part : undefined;
-
   // Each part is bound once and then spread conditionally. Under
   // `exactOptionalPropertyTypes` an optional property has to be *absent*
-  // rather than explicitly `undefined`, and calling `numeric()` twice inside
-  // the ternary does not narrow — the value TypeScript sees in the object
-  // literal is still `number | undefined`.
-  const year = numeric(parts.year);
-  const month = numeric(parts.month);
-  const day = numeric(parts.day);
+  // rather than explicitly `undefined`, and calling `numericPart()` twice
+  // inside the ternary does not narrow — the value TypeScript sees in the
+  // object literal is still `number | undefined`.
+  const year = numericPart(parts.year);
+  const month = numericPart(parts.month);
+  const day = numericPart(parts.day);
 
   return {
     ...(year === undefined ? {} : { year }),
@@ -369,6 +365,14 @@ export function readDate(
     ...(day === undefined ? {} : { day }),
     raw,
   };
+}
+
+function numericPart(part: number | null | undefined): number | undefined {
+  return typeof part === 'number' && Number.isFinite(part) ? part : undefined;
+}
+
+function pad(value: number): string {
+  return String(value).padStart(2, '0');
 }
 
 /**
@@ -397,7 +401,6 @@ export function formatDate(
         '{ month, day } for a birthday whose year is unknown.'
     );
   }
-  const pad = (value: number): string => String(value).padStart(2, '0');
   if (year === undefined) {
     if (version === '4.0') {
       return { value: `--${pad(month)}${pad(day)}`, substitutedYear: false };
@@ -508,11 +511,13 @@ export function photoBytes(
   // client may render in a webview using exactly that type. `text/html` and
   // `image/svg+xml` are both reachable that way — verified — and an SVG is a
   // document with a `<script>` element, not a photo. So: sniff, allow four
-  // raster formats, and refuse to label anything else.
-  return {
-    data,
-    mediaType: sniffImageType(data) ?? 'application/octet-stream',
-  };
+  // raster formats, and hand over nothing else. Bytes that are not one of the
+  // four used to go out as `application/octet-stream` in an `image` block — a
+  // label a client that saves the block and opens it by its own sniffing
+  // does not read — and there is no photo to show in that case anyway.
+  const mediaType = sniffImageType(data);
+  if (mediaType === undefined) return undefined;
+  return { data, mediaType };
 }
 
 /**
@@ -522,7 +527,8 @@ export function photoBytes(
  * Deliberately shorter than {@link mediaTypeOf}'s map: this decides what a
  * client is told to render, where that one only reports what a card claims.
  * TIFF and BMP are dropped because nothing renders them inline anyway, and SVG
- * because it is scriptable.
+ * because it is scriptable. Anything else is not delivered at all — see
+ * {@link photoBytes}.
  */
 export function sniffImageType(data: Buffer): string | undefined {
   if (
@@ -561,22 +567,43 @@ function mediaTypeOf(prop: ICAL.Property): string | undefined {
     .toLowerCase()
     .replace(/^image\//, '');
   if (format.length === 0) return undefined;
-  const known: Record<string, string> = {
-    jpeg: 'image/jpeg',
-    jpg: 'image/jpeg',
-    png: 'image/png',
-    gif: 'image/gif',
-    webp: 'image/webp',
-    tiff: 'image/tiff',
-    bmp: 'image/bmp',
-    svg: 'image/svg+xml',
-  };
-  return known[format];
+  // `Object.hasOwn`, because `format` is a string the card's author chose and
+  // the table is an object literal with a prototype. `TYPE=constructor` used
+  // to return `Object` itself — a function where the declared type promised a
+  // string — and the projection's `sanitizeShortText` then threw
+  // `input.normalize is not a function` out of every listing that card was in.
+  return Object.hasOwn(KNOWN_PHOTO_FORMATS, format)
+    ? KNOWN_PHOTO_FORMATS[format]
+    : undefined;
 }
 
+/** Maps a 3.0 `TYPE=` format name onto a media type. */
+const KNOWN_PHOTO_FORMATS: Record<string, string> = {
+  jpeg: 'image/jpeg',
+  jpg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  tiff: 'image/tiff',
+  bmp: 'image/bmp',
+  svg: 'image/svg+xml',
+};
+
+/**
+ * Decoded size of a base64 payload, without decoding it.
+ *
+ * The padding used to be measured with `/=*$/`, and that regex is quadratic:
+ * unanchored at the start, it is tried from every position of a run of `=`,
+ * and each attempt consumes the run to its end before `$` fails on the byte
+ * after it. A card carrying 80 000 `=` in its `PHOTO` — which anyone with write
+ * access to a shared address book can store — cost two seconds here, on the
+ * thread that serves every request, and a card at the 1 MiB read ceiling cost
+ * minutes. Base64 padding is at most two characters, so two `endsWith` calls
+ * answer the question in constant time.
+ */
 function base64Bytes(payload: string): number {
   const clean = payload.replace(/\s+/g, '');
-  const padding = /=*$/.exec(clean)?.[0].length ?? 0;
+  const padding = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0;
   return Math.max(0, Math.floor((clean.length * 3) / 4) - padding);
 }
 

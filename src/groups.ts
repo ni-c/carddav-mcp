@@ -81,8 +81,9 @@ export interface MemberTarget {
 export async function memberIndex(
   api: CardDavApi,
   book: AddressBookEntry
-): Promise<Map<string, MemberTarget>> {
+): Promise<{ index: Map<string, MemberTarget>; duplicates: number }> {
   const index = new Map<string, MemberTarget>();
+  let duplicates = 0;
   for (const document of await listCards(api, [book], SUMMARY_PROPS)) {
     let card: ICAL.Component;
     try {
@@ -92,12 +93,33 @@ export async function memberIndex(
     }
     const uid = readText(card, 'uid');
     if (uid === undefined) continue;
+    // First card wins, and the collision is counted rather than resolved by
+    // document order. A UID is the card's identity in every group that names
+    // it, and a second card carrying the same one — `create_contact` keeps the
+    // UID of a pasted `raw_vcard`, and so does every import — used to
+    // re-point the member row silently at whichever card the server listed
+    // last. Which card is "the" member is not this server's call to make; it
+    // says that there are two.
+    if (index.has(uid)) {
+      duplicates += 1;
+      continue;
+    }
     index.set(uid, {
       id: buildEntityId(book.path, document.resourceName),
       name: readText(card, 'fn'),
     });
   }
-  return index;
+  return { index, duplicates };
+}
+
+/** The note a caller gets when {@link memberIndex} found duplicate UIDs. */
+export function duplicateUidNote(duplicates: number): string {
+  return (
+    `${duplicates} card(s) in this address book share a UID with another ` +
+    'card. Membership is stored by UID, so for those the first card the ' +
+    'server listed is the one shown here; the others are not resolved. ' +
+    'Give each card its own UID to make group membership unambiguous.'
+  );
 }
 
 /**
@@ -147,12 +169,20 @@ export function assertGroup(card: ICAL.Component, tool: string): GroupModel {
   return model;
 }
 
-/** Refuses an id that turned out to name a group where a contact was meant. */
+/**
+ * Refuses an id that turned out to name a group where a contact was meant.
+ *
+ * The way out is phrased conditionally: `get_group` is not in the `essential`
+ * preset, and a sentence that names it flatly sent a model under that preset
+ * after a tool missing from `tools/list` — the same failure the docblock above
+ * describes for the write tools, one tool further along.
+ */
 export function assertNotGroup(card: ICAL.Component, tool: string): void {
   if (isGroup(card)) {
     throw new ToolInputError(
       `carddav-mcp: that id names a group, not a contact, so ${tool} cannot ` +
-        'act on it. get_group reads it.'
+        'act on it. The group tools handle it (get_group reads it), where ' +
+        'they are enabled.'
     );
   }
 }

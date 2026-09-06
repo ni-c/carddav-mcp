@@ -16,7 +16,10 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      # --ignore-scripts: nothing in this tree needs an install hook, and a
+      # release job must not run one — the dependency tree is the one input the
+      # tag does not pin.
+      - run: npm ci --ignore-scripts
       - run: npm run lint
       - run: npm run build
       - run: npm run test:coverage
@@ -43,7 +46,11 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match package.json version $pkg" >&2
             exit 1
           fi
-      - run: npm ci
+      # --ignore-scripts, and here it matters most: this is the one job that
+      # holds an OIDC token npm accepts for publishing, and an unqualified
+      # `npm ci` runs every dependency's install hook while holding it. The
+      # audit job and the Dockerfile already install this way.
+      - run: npm ci --ignore-scripts
       # --provenance requires a PUBLIC repository. The package is scoped, so
       # publishConfig.access must be "public" in package.json — there is no
       # --access flag here, and npm reports a restricted publish as a 404.
@@ -128,5 +135,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
             --title "$GITHUB_REF_NAME" \
             --notes-file release-notes.md

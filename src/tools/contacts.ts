@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 
 import { assess, sanitizeShortText } from '../analyze.js';
+import { isOpaqueToken } from '../api.js';
 import {
   SUMMARY_PROPS,
   syncCollectionBody,
@@ -24,6 +25,7 @@ import {
 } from '../output-schema.js';
 import {
   errorResult,
+  exportResult,
   fencedUntrustedResult,
   MAX_RESULT_BYTES,
   ownWordsResult,
@@ -39,7 +41,7 @@ import {
   searchField,
 } from '../schema.js';
 import { MAX_MAX_ENTRIES } from '../config.js';
-import { parseVCard, photoBytes, photoInfo, type ICAL } from '../vcard.js';
+import { parseVCard, photoBytes, photoInfo } from '../vcard.js';
 import { assertNotGroup } from '../groups.js';
 import { READ_ONLY } from './annotations.js';
 import {
@@ -127,20 +129,25 @@ export function registerContactTools(
         let groupsHidden = 0;
         const shaped: Record<string, unknown>[] = [];
         for (const document of documents) {
-          let card: ICAL.Component;
+          // Parsing *and* shaping inside the guard. A card that parses and
+          // then fails to shape — `PHOTO;TYPE=constructor` reached a
+          // prototype key and put a function where a string was promised —
+          // used to take the whole listing down, where an unparseable card
+          // was merely counted. Both are one bad card among many.
+          let entry: Record<string, unknown>;
           try {
-            card = parseVCard(document.vcf, 'a card in the address book');
+            const card = parseVCard(document.vcf, 'a card in the address book');
+            entry = shapeSummary(
+              card,
+              document.book,
+              document.resourceName,
+              document.etag,
+              true
+            );
           } catch {
             unreadable += 1;
             continue;
           }
-          const entry = shapeSummary(
-            card,
-            document.book,
-            document.resourceName,
-            document.etag,
-            true
-          );
           if (entry.is_group === true && args.include_groups !== true) {
             groupsHidden += 1;
             continue;
@@ -287,21 +294,25 @@ export function registerContactTools(
 
         const shaped: Record<string, unknown>[] = [];
         for (const document of outcome.documents) {
-          let card: ICAL.Component;
           try {
-            card = parseVCard(document.vcf, 'a card in the search result');
+            const card = parseVCard(
+              document.vcf,
+              'a card in the search result'
+            );
+            shaped.push(
+              shapeSummary(
+                card,
+                document.book,
+                document.resourceName,
+                document.etag,
+                true
+              )
+            );
           } catch {
+            // Unparseable or unshapeable: one bad card among many — see
+            // `list_contacts`.
             continue;
           }
-          shaped.push(
-            shapeSummary(
-              card,
-              document.book,
-              document.resourceName,
-              document.etag,
-              true
-            )
-          );
         }
 
         const collected = [...outcome.notes];
@@ -353,17 +364,23 @@ export function registerContactTools(
               'names. get_contact reports the address.'
           );
         }
+        // Size first, from the metadata, before a byte is decoded: the
+        // refusal names the size, and an oversized blob is refused for its
+        // size whether or not it is a picture.
+        if (info.bytes !== undefined && info.bytes > MAX_PHOTO_BYTES) {
+          return errorResult(
+            `carddav-mcp: the photo is ${info.bytes} bytes, past ` +
+              `the ${MAX_PHOTO_BYTES}-byte ceiling this tool applies. ` +
+              'get_contact reports its size without fetching it.'
+          );
+        }
         const photo = photoBytes(loaded.card);
         if (photo === undefined) {
           return errorResult(
-            'carddav-mcp: the photo on this card could not be decoded.'
-          );
-        }
-        if (photo.data.byteLength > MAX_PHOTO_BYTES) {
-          return errorResult(
-            `carddav-mcp: the photo is ${photo.data.byteLength} bytes, past ` +
-              `the ${MAX_PHOTO_BYTES}-byte ceiling this tool applies. ` +
-              'get_contact reports its size without fetching it.'
+            'carddav-mcp: the photo on this card could not be decoded as a ' +
+              'JPEG, PNG, GIF or WebP image, so it is not handed over. The ' +
+              'media type is decided from the bytes, never from what the ' +
+              'card claims.'
           );
         }
 
@@ -460,7 +477,8 @@ export function registerContactTools(
           for (const id of args.ids) {
             if (exported.length >= limit || bytes > MAX_RESULT_BYTES) break;
             const loaded = await loadById(context, registry, id);
-            bytes += loaded.vcf.length;
+            // Bytes, like the budget measures — `.length` counts UTF-16 units.
+            bytes += Buffer.byteLength(loaded.vcf, 'utf8');
             exported.push({ id, vcard: loaded.vcf });
           }
           const unread = args.ids.length - exported.length;
@@ -486,12 +504,18 @@ export function registerContactTools(
         const { shown, dropped } = applyLimit(exported, limit);
         if (dropped > 0) collected.push(limitNote(dropped, limit));
 
-        return untrustedResult(
+        // The injection scan runs over the raw text, which is where the
+        // shapes are; the fence in the text channel is the only framing the
+        // raw export gets, so the warning goes there too.
+        const signals = assess(shown.map((entry) => entry.vcard).join('\n'));
+        return exportResult(
           {
             vcards: shown,
             count: shown.length,
             ...(collected.length > 0 ? { notes: collected } : {}),
           },
+          shown,
+          signals.suspicious,
           'Export fewer contacts at a time with `limit`, or name ids.'
         );
       })
@@ -510,7 +534,11 @@ export function registerContactTools(
         address_book: addressBookRef,
         sync_token: z
           .string()
-          .max(2048)
+          .max(512)
+          // The same rule the token is held to on the way *out*: nothing this
+          // server ever returned fails it, so a value that does was not
+          // issued here, and it is refused before it reaches a request body.
+          .refine(isOpaqueToken, 'is not a sync token this server issued')
           .optional()
           .describe(
             'The token from a previous call. Left out, this returns the ' +
@@ -629,7 +657,8 @@ export function registerContactTools(
 
         return ownWordsResult(
           {
-            address_book: book.path,
+            // Own words, no marker: the path is the server's string.
+            address_book: sanitizeShortText(book.path),
             ...(syncToken === undefined ? {} : { sync_token: syncToken }),
             changed: changedShown.shown,
             removed: removedShown.shown,

@@ -9,6 +9,7 @@ import {
   call,
   connect,
   dataOf,
+  exportOf,
   FakeCardDav,
   textOf,
   vcard,
@@ -88,8 +89,8 @@ describe('the tool surface', () => {
   it('lists every catalogued tool', async () => {
     await open();
     const { tools } = await session.client.listTools();
-    expect(tools.map((tool) => tool.name).sort()).toEqual(
-      [...ALL_TOOLS].sort()
+    expect(tools.map((tool) => tool.name).toSorted()).toEqual(
+      [...ALL_TOOLS].toSorted()
     );
   });
 
@@ -106,8 +107,8 @@ describe('the tool surface', () => {
   it('registers only the read tools under read-only', async () => {
     await open({}, { readOnly: true });
     const { tools } = await session.client.listTools();
-    expect(tools.map((tool) => tool.name).sort()).toEqual(
-      [...READ_TOOLS].sort()
+    expect(tools.map((tool) => tool.name).toSorted()).toEqual(
+      [...READ_TOOLS].toSorted()
     );
   });
 
@@ -274,10 +275,10 @@ describe('list_contacts', () => {
     await open();
     const without = dataOf(await call(session, 'list_contacts'));
     expect(without.count).toBe(2);
-    const with_ = dataOf(
+    const withGroups = dataOf(
       await call(session, 'list_contacts', { include_groups: true })
     );
-    expect(with_.count).toBe(3);
+    expect(withGroups.count).toBe(3);
   });
 
   it('honours the address book argument', async () => {
@@ -551,7 +552,7 @@ describe('export_contacts', () => {
     // An export that dropped the properties this server does not model would
     // be a backup that silently loses data.
     await open();
-    const data = dataOf(
+    const data = exportOf(
       await call(session, 'export_contacts', { address_book: 'work' })
     );
     const exported = data.vcards as { id: string; vcard: string }[];
@@ -564,7 +565,7 @@ describe('export_contacts', () => {
     await open();
     const listed = dataOf(await call(session, 'list_contacts'));
     const [first] = listed.contacts as Record<string, unknown>[];
-    const data = dataOf(
+    const data = exportOf(
       await call(session, 'export_contacts', { ids: [first?.id as string] })
     );
     expect(data.count).toBe(1);

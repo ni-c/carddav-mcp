@@ -130,7 +130,7 @@ describe('list_groups', () => {
     const models = (data.groups as Record<string, unknown>[]).map(
       (group) => group.model
     );
-    expect(models.sort()).toEqual(['apple', 'rfc']);
+    expect(models.toSorted()).toEqual(['apple', 'rfc']);
   });
 });
 
@@ -353,7 +353,7 @@ describe('delete_group', () => {
     );
     expect(data.deleted).toBe(true);
     expect(data.members_released).toBe(1);
-    expect(fake.names('work').sort()).toEqual(['ada.vcf', 'grace.vcf']);
+    expect(fake.names('work').toSorted()).toEqual(['ada.vcf', 'grace.vcf']);
     expect(session.prompts[0]).toContain('delete a group of 1 contact');
   });
 

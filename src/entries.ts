@@ -72,7 +72,14 @@ export function resourceNameOf(
   // answer the same question from opposite ends: the name sits directly inside
   // the collection, and it is not the collection itself. An href equal to the
   // collection would otherwise file the collection's own name as a resource.
-  const parent = path.replace(/[^/]*$/, '');
+  //
+  // `lastIndexOf`, not `replace(/[^/]*$/, '')`: that regex is retried from
+  // every position of the final segment and consumes the rest of the string
+  // each time, so a server that puts an 80 000-character segment in an href
+  // — one `<D:response>` in a listing — cost two seconds here, and a segment
+  // filling the 16 MiB multistatus ceiling cost hours. `parseMultiStatus` now
+  // also refuses an href past `MAX_HREF_CHARS`, so this is the second guard.
+  const parent = path.slice(0, path.lastIndexOf('/') + 1);
   if (parent !== book.path || path === book.path) return '';
   return path.slice(parent.length);
 }
