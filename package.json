@@ -1,6 +1,6 @@
 {
   "name": "@ni-c/carddav-mcp",
-  "version": "0.1.0",
+  "version": "0.1.0-rc.1",
   "mcpName": "io.github.ni-c/carddav-mcp",
   "description": "Model Context Protocol (MCP) server for CardDAV address books: contacts, groups and photos",
   "keywords": [
