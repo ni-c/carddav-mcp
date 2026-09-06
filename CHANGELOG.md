@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
      marker last in the file so the link definitions come along. -->
 <!-- #region changelog -->
 
-## [Unreleased]
+## [0.1.0] - 2026-09-06
 
 ### Added
 
@@ -86,5 +86,7 @@ photos, on any server that speaks the standard.
   collection URL, RFC 6578 `sync-collection` as `list_changes`, and a raw vCard
   export that keeps the properties this server does not model — because an
   export that dropped them would be a backup that silently loses data.
+
+[0.1.0]: https://github.com/ni-c/carddav-mcp/releases/tag/v0.1.0
 
 <!-- #endregion changelog -->
