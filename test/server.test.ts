@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { expectPortableToolSchemas } from 'mcp-integration-harness';
 
+import { SERVER_INFO } from '../src/server.js';
 import { ALL_TOOLS, READ_TOOLS } from '../src/tools/catalogue.js';
 import {
   call,
@@ -648,5 +651,55 @@ describe('list_changes', () => {
       await call(session, 'list_changes', { address_book: 'work' })
     );
     expect(data.sync_token).toBe('http://radicale.org/ns/sync/abc123');
+  });
+});
+
+describe('the server introduces itself', () => {
+  it('sends all six Implementation fields, not just a name tag', async () => {
+    // Every client that shows a server to a person reads these. All four of the
+    // optional ones were already written down in `server.json` for the
+    // registry, and none of them reached the wire — the registry got the whole
+    // profile and the client got `{name, version}`.
+    await open();
+    const info = session.client.getServerVersion() as
+      Record<string, unknown> | undefined;
+    expect(info?.name).toBe('carddav-mcp');
+    expect(info?.version).toBeTruthy();
+    expect(info?.title).toBeTruthy();
+    expect(info?.description).toBeTruthy();
+    expect(info?.websiteUrl).toBe('https://carddav-mcp.ni-c.de');
+    expect(Array.isArray(info?.icons)).toBe(true);
+  });
+
+  it('says the same thing on the wire as in server.json', async () => {
+    // `server.json` is not in the tarball — `files` ships `dist` — so it cannot
+    // be the runtime source, and two hand-written copies of one profile drift.
+    // This is the same drift check `docs:tools:check` runs for the tool list.
+    const manifest = JSON.parse(
+      readFileSync(new URL('../server.json', import.meta.url), 'utf8')
+    ) as Record<string, unknown>;
+
+    expect(SERVER_INFO.title).toBe(manifest.title);
+    expect(SERVER_INFO.description).toBe(manifest.description);
+    expect(SERVER_INFO.websiteUrl).toBe(manifest.websiteUrl);
+    expect(SERVER_INFO.icons).toEqual(manifest.icons);
+    expect(manifest.name).toBe(`io.github.ni-c/${SERVER_INFO.name}`);
+  });
+
+  it('keeps the registry description inside the 100-character limit', () => {
+    // A hard limit, enforced only at publish time — by which point npm, the
+    // GitHub release and the image are already out.
+    expect(SERVER_INFO.description.length).toBeLessThanOrEqual(100);
+  });
+
+  it('serves its icons over https from the docs site, never inline', () => {
+    // A `data:` URI would ride along on every single handshake.
+    for (const icon of SERVER_INFO.icons) {
+      expect(icon.src.startsWith('https://carddav-mcp.ni-c.de/')).toBe(true);
+      expect(icon.src.length).toBeLessThanOrEqual(255);
+    }
+    // PNG first: the specification requires clients to support it and only
+    // recommends SVG.
+    expect(SERVER_INFO.icons[0]?.mimeType).toBe('image/png');
   });
 });

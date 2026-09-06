@@ -26,6 +26,40 @@ function packageVersion(): string {
   }
 }
 
+/** The docs site, which is also where the icons are served from. */
+const SITE = 'https://carddav-mcp.ni-c.de';
+
+/**
+ * How this server introduces itself in the handshake.
+ *
+ * `Implementation` is not a name tag. Every client that shows a server to a
+ * person reads `title`, `description`, `websiteUrl` and `icons`, and all four
+ * were already written down — in `server.json`, for the registry. None of them
+ * reached the wire: the registry got the whole profile and the client got
+ * `{name, version}`.
+ *
+ * `server.json` cannot be the runtime source, because `files` ships `dist` and
+ * not the manifest. So the values are written here and a test compares the two
+ * — the same drift check `docs:tools:check` runs for the tool list.
+ *
+ * The icons are **URLs, never `data:`**. The docs site has an enforced
+ * certificate and an embedded icon would ride along on every single handshake.
+ * PNG first because the specification requires clients to support it and only
+ * recommends SVG.
+ */
+export const SERVER_INFO = {
+  name: 'carddav-mcp',
+  version: packageVersion(),
+  title: 'CardDAV address books',
+  description:
+    'Read and write CardDAV address books: contacts, groups and photos over the open standard',
+  websiteUrl: SITE,
+  icons: [
+    { src: `${SITE}/icon-512.png`, mimeType: 'image/png', sizes: ['512x512'] },
+    { src: `${SITE}/favicon.svg`, mimeType: 'image/svg+xml', sizes: ['any'] },
+  ],
+};
+
 /**
  * What the model is told about this server before it sees a single tool.
  *
@@ -82,10 +116,7 @@ export function createServer(config: Config): McpServer {
     elicitation: config.elicitation,
   });
 
-  const server = new McpServer(
-    { name: 'carddav-mcp', version: packageVersion() },
-    { instructions: INSTRUCTIONS }
-  );
+  const server = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS });
 
   // Wraps server.registerTool, so it has to sit before the first register call
   // and does not care how they are organised.
