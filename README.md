@@ -220,9 +220,9 @@ repeated here.
   "source": "carddav",
   "contacts": [
     {
-      "id": "c1.L2FkZHJlc3Nib29rcy93aWxsaS93b3JrLw.YWRhLnZjZg",
+      "id": "c1.L2FkZHJlc3Nib29rcy95b3Uvd29yay8.YWRhLnZjZg",
       "uid": "uid-ada",
-      "address_book": "/addressbooks/willi/work/",
+      "address_book": "/addressbooks/you/work/",
       "formatted_name": "Ada Lovelace",
       "name": { "family": "Lovelace", "given": "Ada" },
       "organization": "Analytical Engines",

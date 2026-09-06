@@ -64,7 +64,7 @@ The contacts stay in the address book; only the grouping is removed. A CardDAV
 server has no trash, so the group cannot be recovered from here.
 
 Values below are supplied by the caller, not by this server:
-  Address book: /addressbooks/willi/work/
+  Address book: /addressbooks/you/work/
   Members: 12
 ```
 

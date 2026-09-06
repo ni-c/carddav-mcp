@@ -108,9 +108,9 @@ describe('typed values', () => {
       'BEGIN:VCARD',
       'VERSION:3.0',
       'FN:Multi',
-      'TEL;TYPE=WORK,VOICE,PREF:+352 1',
-      'TEL;TYPE=cell:+352 2',
-      'TEL:+352 3',
+      'TEL;TYPE=WORK,VOICE,PREF:+44 20 7946 0101',
+      'TEL;TYPE=cell:+44 20 7946 0102',
+      'TEL:+44 20 7946 0103',
       'END:VCARD',
     ]),
     'a card'
@@ -498,7 +498,7 @@ describe('building a card', () => {
 
   it('writes the TYPE in upper case, which 3.0 clients expect', () => {
     const built = newVCard('u1', '3.0');
-    writeTyped(built, 'tel', [{ value: '+352 1', type: 'cell' }]);
+    writeTyped(built, 'tel', [{ value: '+44 20 7946 0101', type: 'cell' }]);
     expect(serializeVCard(built)).toContain('TEL;TYPE=CELL:');
   });
 

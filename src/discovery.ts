@@ -32,7 +32,7 @@ import {
  * - `https://example.net/dav.php/` — Baikal, where the CardDAV endpoint sits
  *   under a path and the well-known route is only present when the vhost was
  *   configured for it. Its absence is normal, not a fault.
- * - `https://dav.example.net/addressbooks/willi/contacts/` — a collection URL,
+ * - `https://dav.example.net/addressbooks/you/contacts/` — a collection URL,
  *   pasted out of a client's settings. Which is what most people actually do,
  *   so it is detected first rather than treated as a mistake.
  */

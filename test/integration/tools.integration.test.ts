@@ -103,7 +103,7 @@ describe('contacts', () => {
         department: 'Research',
         title: 'Mathematician',
         emails: [{ value: 'ada@example.net', type: 'work' }],
-        phones: [{ value: '+352 111', type: 'cell' }],
+        phones: [{ value: '+44 20 7946 0111', type: 'cell' }],
         addresses: [
           { type: 'home', street: 'Main 1', locality: 'Town', country: 'LU' },
         ],

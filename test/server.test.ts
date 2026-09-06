@@ -17,7 +17,7 @@ const ADA = vcard({
   FN: 'Ada Lovelace',
   N: 'Lovelace;Ada;;;',
   'EMAIL;TYPE=WORK': 'ada@example.net',
-  'TEL;TYPE=CELL': '+352 111',
+  'TEL;TYPE=CELL': '+44 20 7946 0111',
   ORG: 'Analytical Engines;Research',
   TITLE: 'Mathematician',
   'BDAY;VALUE=date': '1815-12-10',

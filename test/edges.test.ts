@@ -332,7 +332,7 @@ describe('write helpers', () => {
       role: 'Leader',
       note: 'A note',
       emails: [{ value: 'a@example.net', type: 'work' }],
-      phones: [{ value: '+352 1' }],
+      phones: [{ value: '+44 20 7946 0101' }],
       urls: [{ value: 'https://example.net' }],
       instant_messaging: [{ value: 'xmpp:a@example.net' }],
       addresses: [
