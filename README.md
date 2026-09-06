@@ -9,6 +9,7 @@
 [![container](https://img.shields.io/badge/ghcr.io-ni--c%2Fcarddav--mcp-blue)](https://github.com/ni-c/carddav-mcp/pkgs/container/carddav-mcp)
 [![docs](https://img.shields.io/badge/docs-carddav--mcp.ni--c.de-informational)](https://carddav-mcp.ni-c.de)
 [![HTTP • via mcp-hub](https://img.shields.io/badge/HTTP-via%20mcp--hub-6f42c1)](https://mcp-hub.ni-c.de)
+[![Glama](https://glama.ai/mcp/servers/ni-c/carddav-mcp/badges/score.svg)](https://glama.ai/mcp/servers/ni-c/carddav-mcp)
 [![sponsor](https://img.shields.io/badge/sponsor-ni--c-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/ni-c)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for

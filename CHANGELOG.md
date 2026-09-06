@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A test asserting the server warns about untrusted content in `instructions`,
   the one channel a model reads before it calls anything.
+- The Glama badge, now that the listing exists. Eleventh and last but one in
+  the row, which is the full set.
 
 ## [0.1.0] - 2026-09-06
 
