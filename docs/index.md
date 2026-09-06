@@ -69,7 +69,7 @@ features:
   <text class="label-muted" x="496" y="130" text-anchor="middle">PROPFIND · REPORT · PUT</text>
 
   <path class="edge edge-dashed" d="M625,150 L625,196" marker-end="url(#arch-arrow)" />
-  <text class="label-muted" x="625" y="216" text-anchor="middle">iCalendar, marked untrusted</text>
+  <text class="label-muted" x="625" y="216" text-anchor="middle">vCard, marked untrusted</text>
 </svg>
 <!-- ARCHITECTURE:END -->
 <figcaption>One client, one server, one address book — and nothing else on the wire.</figcaption>

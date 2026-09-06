@@ -9,7 +9,7 @@ const { version } = JSON.parse(
 ) as { version: string };
 
 const site = 'https://carddav-mcp.ni-c.de';
-const description = 'MCP server for CardDAV calendars: events, tasks and journal entries';
+const description = 'MCP server for CardDAV address books: contacts, groups and photos';
 
 export default defineConfig({
   title: 'carddav-mcp',
