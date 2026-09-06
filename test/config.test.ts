@@ -143,11 +143,17 @@ describe('loadConfig', () => {
     expect(redactUnparsedUrl(input)).toBe(expected);
   });
 
+  // No vendor-recognisable token shapes here, and that is deliberate rather
+  // than squeamish: a realistic `xox…-` string tripped GitHub's secret scanning
+  // on the very first push, and it would do so again in every fork and every
+  // clone — an alert that is always a false positive is how a security tab
+  // stops being read. What the rule under test cares about is the *shape* of
+  // the input (no `@`, no `?`), which none of these have either.
   it.each([
-    ['ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8', 'a GitHub token'],
-    ['xoxb-123456789012-abcdefghijklmnopqrst', 'a Slack token'],
+    ['0123456789abcdef0123456789abcdef01234567', 'a 40-character hex API key'],
+    ['bXktYXBwLXNlY3JldC12YWx1ZS1nb2VzLWhlcmU=', 'a base64 secret'],
     ['eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSM', 'a JWT'],
-    ['abcd-efgh-ijkl-mnop', 'a Fastmail app password'],
+    ['abcd-efgh-ijkl-mnop', 'an app-specific password'],
   ])('never echoes %s (%s) pasted into CARDDAV_URL', (secret) => {
     // The regression this exists for: a credential put in the wrong variable
     // contains no `@` and no `?`, so every rule that redacted "where something

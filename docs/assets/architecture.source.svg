@@ -45,16 +45,27 @@
   <text class="label-muted" x="365" y="115" text-anchor="middle">17 tools</text>
   <text class="label-muted" x="365" y="133" text-anchor="middle">asks a person</text>
 
+  <!-- Two lines rather than one: "Radicale, Baikal, Nextcloud, …" is about
+       168px at 11.5px and the box is 150 wide, so on one line it spilled past
+       both edges of its own box. -->
   <rect class="node" x="550" y="70" width="150" height="80" rx="10" />
-  <text class="label-title" x="625" y="103" text-anchor="middle">CardDAV</text>
-  <text class="label-muted" x="625" y="123" text-anchor="middle">Radicale, Baikal, Nextcloud, …</text>
+  <text class="label-title" x="625" y="100" text-anchor="middle">CardDAV</text>
+  <text class="label-muted" x="625" y="120" text-anchor="middle">Radicale, Baikal,</text>
+  <text class="label-muted" x="625" y="136" text-anchor="middle">Nextcloud, …</text>
 
   <path class="edge-accent" d="M180,110 L272,110" marker-end="url(#arch-arrow-accent)" />
   <text class="label-mono" x="226" y="98" text-anchor="middle">stdio</text>
 
   <path class="edge-accent" d="M450,110 L542,110" marker-end="url(#arch-arrow-accent)" />
   <text class="label-mono" x="496" y="98" text-anchor="middle">HTTPS</text>
-  <text class="label-muted" x="496" y="130" text-anchor="middle">PROPFIND · REPORT · PUT</text>
+  <!-- Stacked, not joined with separators. The gap between the two boxes is
+       100px wide and the one-line version was ~150px, so it was drawn straight
+       across the right edge of carddav-mcp and into the CardDAV box, on top of
+       the text already there. Each verb on its own line fits the gap with room
+       to spare and reads as a list rather than as a sentence. -->
+  <text class="label-muted" x="496" y="128" text-anchor="middle">PROPFIND</text>
+  <text class="label-muted" x="496" y="144" text-anchor="middle">REPORT</text>
+  <text class="label-muted" x="496" y="160" text-anchor="middle">PUT</text>
 
   <path class="edge edge-dashed" d="M625,150 L625,196" marker-end="url(#arch-arrow)" />
   <text class="label-muted" x="625" y="216" text-anchor="middle">vCard, marked untrusted</text>

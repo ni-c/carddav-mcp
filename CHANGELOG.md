@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Glama badge, now that the listing exists. Eleventh and last but one in
   the row, which is the full set.
 
+### Fixed
+
+- Two overlapping labels in the architecture diagram. `PROPFIND · REPORT · PUT`
+  was about 150px on one line in a 100px gap, so it was drawn across the right
+  edge of the carddav-mcp box and into the CardDAV box, on top of the text
+  already there; the three verbs are stacked now. `Radicale, Baikal, Nextcloud,
+…` overflowed both edges of its own box and is on two lines.
+
 ## [0.1.0] - 2026-09-06
 
 ### Added
