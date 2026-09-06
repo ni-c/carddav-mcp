@@ -336,14 +336,14 @@ describe('write helpers', () => {
       urls: [{ value: 'https://example.net' }],
       instant_messaging: [{ value: 'xmpp:a@example.net' }],
       addresses: [
-        { type: 'home', street: 'Main 1', locality: 'Town', country: 'LU' },
+        { type: 'home', street: 'Main 1', locality: 'Town', country: 'GB' },
       ],
       categories: ['one', 'two'],
       anniversary: { year: 2000, month: 6, day: 1 },
     });
     const text = card.toString();
     expect(text).toContain('NICKNAME:Nick');
-    expect(text).toContain('ADR;TYPE=HOME:;;Main 1;Town;;;LU');
+    expect(text).toContain('ADR;TYPE=HOME:;;Main 1;Town;;;GB');
     expect(text).toContain('CATEGORIES:one,two');
     expect(text).toContain('ANNIVERSARY');
     expect(text).toContain('IMPP:xmpp:a@example.net');
@@ -397,7 +397,7 @@ describe('shapeFull', () => {
         UID: 'u',
         FN: 'Someone',
         'ADR;TYPE=WORK;LABEL=Main office':
-          ';Floor 2;Main 1;Town;Region;L-1234;LU',
+          ';Floor 2;Main 1;Town;Region;SW1A 1AA;GB',
       }),
       'a card'
     );
@@ -409,8 +409,8 @@ describe('shapeFull', () => {
       street: 'Main 1',
       locality: 'Town',
       region: 'Region',
-      postal_code: 'L-1234',
-      country: 'LU',
+      postal_code: 'SW1A 1AA',
+      country: 'GB',
       label: 'Main office',
     });
   });

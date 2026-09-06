@@ -105,7 +105,7 @@ describe('contacts', () => {
         emails: [{ value: 'ada@example.net', type: 'work' }],
         phones: [{ value: '+44 20 7946 0111', type: 'cell' }],
         addresses: [
-          { type: 'home', street: 'Main 1', locality: 'Town', country: 'LU' },
+          { type: 'home', street: 'Main 1', locality: 'Town', country: 'GB' },
         ],
         birthday: { year: 1815, month: 12, day: 10 },
         categories: ['history', 'maths'],
