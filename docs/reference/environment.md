@@ -40,7 +40,7 @@ outcome. An entry matching two books stops the server rather than picking one.
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `CARDDAV_INSECURE_TLS` | no | `false` | `true` accepts a self-signed certificate **on the configured host only**, through a scoped dispatcher. `NODE_TLS_REJECT_UNAUTHORIZED` is never set. |
+| `CARDDAV_INSECURE_TLS` | no | `false` | `true` accepts a self-signed certificate **on the configured host only**, through a scoped dispatcher. `NODE_TLS_REJECT_UNAUTHORIZED` is never set. It switches off the whole certificate check, hostname verification included — anyone on the path to that host can then present any certificate and receive the credentials — and the scoped dispatcher bypasses a global undici dispatcher (a proxy agent) the host process may have installed. |
 | `CARDDAV_ALLOW_PLAINTEXT` | no | `false` | `true` allows a plain `http://` URL to a host that is not loopback. Without it such a URL **refuses to start**, because it would send the credentials and every contact unencrypted on every request. |
 
 A loopback URL needs neither. `http://127.0.0.1:5232`, `http://localhost:5232`,

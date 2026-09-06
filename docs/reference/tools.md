@@ -87,7 +87,7 @@ Finds contacts whose name, organisation, email address, phone number or note con
 
 **Fetch a contact’s photo** — read-only
 
-Returns the photo stored on a card as an image. Only a photo embedded in the card itself — one stored as a link is reported by get_contact and never fetched, because that address was chosen by whoever wrote the card.
+Returns the photo stored on a card as an image. Only a photo embedded in the card itself — one stored as a link is reported by get_contact and never fetched, because that address was chosen by whoever wrote the card. The media type is decided from the bytes, never from what the card claims: JPEG, PNG, GIF and WebP are handed over, and bytes that are none of those are refused with a sentence rather than delivered under a generic label.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -98,6 +98,8 @@ Returns the photo stored on a card as an image. Only a photo embedded in the car
 **Export contacts as vCard text** — read-only
 
 The raw vCard text of one or more contacts, exactly as stored. The only way to see a property this server does not model, and the only way to take a backup of an address book from here.
+
+This is the one tool whose two channels differ on purpose. `structuredContent` carries the cards byte for byte — that is the backup. The text block is a rendering of the same cards for reading, inside the nonce fence with every line datamarked: invisible characters are removed and markdown image markers are broken there, so a `NOTE` carrying `![…](https://…)` cannot make a client fetch a URL when it renders the answer. The first line of the text block says so. Injection shapes found in the exported cards are reported as a warning above the fence.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -207,7 +209,7 @@ Changes the fields named and leaves everything else exactly as it was — includ
 
 **Delete a contact** — write, destructive
 
-Removes a card. Cannot be undone — a CardDAV server has no trash and no version history. Guarded by the card’s ETag, so a card changed since it was read is refused rather than deleted blind.
+Removes a card. Cannot be undone — a CardDAV server has no trash and no version history. Guarded by the card’s ETag, so a card changed since it was read is refused rather than deleted blind. A group card is refused, before anybody is asked: `delete_group` is the tool for that, and the two stay separable in `CARDDAV_DENY_TOOLS` only because this one cannot reach a group.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
