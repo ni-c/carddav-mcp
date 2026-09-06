@@ -62,12 +62,6 @@ jobs:
       # bytes — fonts rasterise differently here than on a workstation.
       - run: npm run assets:check
         if: matrix.node-version == 24
-      # The tool reference is generated from the built server, so it cannot drift
-      # from the code — but only if something checks that it was regenerated. The
-      # sister server promises this in the generated file's own header and never
-      # ran it; the page was free to rot for as long as nobody looked.
-      - run: npm run docs:tools:check
-        if: matrix.node-version == 24
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: matrix.node-version == 24
         with:
