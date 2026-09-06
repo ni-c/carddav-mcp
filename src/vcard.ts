@@ -502,8 +502,54 @@ export function photoBytes(
   // an attack, and nothing downstream interprets these bytes.
   const data = Buffer.from(payload, 'base64');
   if (data.byteLength === 0) return undefined;
-  return { data, mediaType: info.mediaType ?? 'application/octet-stream' };
+  // The media type is decided by the **bytes**, never by what the card claims.
+  // `info.mediaType` comes straight out of `data:<here>;base64,` or a
+  // `MEDIATYPE=` parameter, and it lands on an `image` content block that a
+  // client may render in a webview using exactly that type. `text/html` and
+  // `image/svg+xml` are both reachable that way — verified — and an SVG is a
+  // document with a `<script>` element, not a photo. So: sniff, allow four
+  // raster formats, and refuse to label anything else.
+  return {
+    data,
+    mediaType: sniffImageType(data) ?? 'application/octet-stream',
+  };
 }
+
+/**
+ * The media type a buffer actually is, for the four raster formats worth
+ * rendering.
+ *
+ * Deliberately shorter than {@link mediaTypeOf}'s map: this decides what a
+ * client is told to render, where that one only reports what a card claims.
+ * TIFF and BMP are dropped because nothing renders them inline anyway, and SVG
+ * because it is scriptable.
+ */
+export function sniffImageType(data: Buffer): string | undefined {
+  if (
+    data.length >= 3 &&
+    data[0] === 0xff &&
+    data[1] === 0xd8 &&
+    data[2] === 0xff
+  ) {
+    return 'image/jpeg';
+  }
+  if (data.length >= 8 && data.subarray(0, 8).equals(PNG_MAGIC))
+    return 'image/png';
+  if (data.length >= 6) {
+    const head = data.subarray(0, 6).toString('latin1');
+    if (head === 'GIF87a' || head === 'GIF89a') return 'image/gif';
+  }
+  if (
+    data.length >= 12 &&
+    data.subarray(0, 4).toString('latin1') === 'RIFF' &&
+    data.subarray(8, 12).toString('latin1') === 'WEBP'
+  ) {
+    return 'image/webp';
+  }
+  return undefined;
+}
+
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /** Maps a 3.0 `TYPE=JPEG` or a 4.0 `MEDIATYPE=` onto a media type. */
 function mediaTypeOf(prop: ICAL.Property): string | undefined {

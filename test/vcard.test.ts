@@ -21,6 +21,7 @@ import {
   resourceNameFor,
   serializeVCard,
   setMembers,
+  sniffImageType,
   touch,
   typesOf,
   versionOf,
@@ -325,14 +326,67 @@ describe('photos', () => {
         'BEGIN:VCARD',
         'VERSION:3.0',
         'FN:x',
-        'PHOTO;ENCODING=b;TYPE=PNG:aGVsbG8=',
+        // A real PNG signature followed by "hello". The media type comes from
+        // these eight bytes, not from `TYPE=PNG` — see the sniffing tests below.
+        'PHOTO;ENCODING=b;TYPE=PNG:iVBORw0KGgpoZWxsbw==',
         'END:VCARD',
       ]),
       'a card'
     );
     const photo = photoBytes(parsed);
     expect(photo?.mediaType).toBe('image/png');
-    expect(photo?.data.toString('utf8')).toBe('hello');
+    expect(photo?.data.subarray(8).toString('utf8')).toBe('hello');
+  });
+
+  it.each([
+    ['data:text/html;base64,', 'text/html'],
+    ['data:image/svg+xml;base64,', 'image/svg+xml'],
+    ['data:application/x-msdownload;base64,', 'application/x-msdownload'],
+  ])(
+    'never labels a photo with the type the card claims (%s)',
+    (prefix, claimed) => {
+      // The claimed type lands on an `image` content block, and a client that
+      // renders one in a webview honours it. `text/html` and `image/svg+xml`
+      // were both reachable from a card anyone with write access to a shared
+      // address book can edit — an SVG carries `<script>`. The bytes decide.
+      const parsed = parseVCard(
+        card([
+          'BEGIN:VCARD',
+          'VERSION:4.0',
+          'FN:x',
+          `PHOTO:${prefix}aGVsbG8=`,
+          'END:VCARD',
+        ]),
+        'a card'
+      );
+      const photo = photoBytes(parsed);
+      expect(photo?.mediaType).not.toBe(claimed);
+      expect(photo?.mediaType).toBe('application/octet-stream');
+    }
+  );
+
+  it.each([
+    ['image/jpeg', Buffer.from([0xff, 0xd8, 0xff, 0x00])],
+    [
+      'image/png',
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    ],
+    ['image/gif', Buffer.from('GIF89a')],
+    [
+      'image/webp',
+      Buffer.concat([
+        Buffer.from('RIFF'),
+        Buffer.alloc(4),
+        Buffer.from('WEBP'),
+      ]),
+    ],
+  ])('sniffs %s out of its magic number', (expected, bytes) => {
+    expect(sniffImageType(bytes)).toBe(expected);
+  });
+
+  it('sniffs nothing out of bytes that are not an image', () => {
+    expect(sniffImageType(Buffer.from('<svg><script/></svg>'))).toBeUndefined();
+    expect(sniffImageType(Buffer.alloc(0))).toBeUndefined();
   });
 
   it('has no photo when the card has none', () => {

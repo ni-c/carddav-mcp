@@ -129,17 +129,40 @@ describe('loadConfig', () => {
       'https://admin:pa/ss@dav.example.net',
       'https://<27 characters, redacted>',
     ],
-    ['not-a-url-at-all', 'not-a-url-at-all'],
+    ['not-a-url-at-all', '<no scheme, 16 characters, redacted>'],
     [
       'https://dav.example.net/x?token=abc',
-      'https://dav.example.net/x<query redacted>',
+      'https://<27 characters, redacted>',
     ],
   ])('redactUnparsedUrl(%s)', (input, expected) => {
-    // The narrow rewrite where it applies, a length where it does not and an
-    // `@` says credentials are in there somewhere, the value untouched where
-    // there is nothing to hide, and the query gone either way — a token in a
-    // query string is a credential the userinfo rule was never looking for.
+    // The narrow rewrite where it applies, and the shape — scheme plus a
+    // length — everywhere else. Nothing that failed to parse is shown, which
+    // is a deliberate reversal: the earlier version handed back the operator's
+    // own string when it carried neither `@` nor `?`, and that is exactly the
+    // shape of a bearer token. See the token cases below.
     expect(redactUnparsedUrl(input)).toBe(expected);
+  });
+
+  it.each([
+    ['ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8', 'a GitHub token'],
+    ['xoxb-123456789012-abcdefghijklmnopqrst', 'a Slack token'],
+    ['eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSM', 'a JWT'],
+    ['abcd-efgh-ijkl-mnop', 'a Fastmail app password'],
+  ])('never echoes %s (%s) pasted into CARDDAV_URL', (secret) => {
+    // The regression this exists for: a credential put in the wrong variable
+    // contains no `@` and no `?`, so every rule that redacted "where something
+    // looks secret" let it through verbatim into the MCP host's log file. The
+    // assertion is on the secret being absent, not on the exact replacement —
+    // it must stay true however the message is reworded.
+    const out = redactUnparsedUrl(secret);
+    expect(out).not.toContain(secret);
+    expect(out).toContain('redacted');
+
+    const { exited, errors } = catchExit(() =>
+      loadConfig(env({ CARDDAV_URL: secret }))
+    );
+    expect(exited).toBe(true);
+    expect(errors.join('\n')).not.toContain(secret);
   });
 
   it('redacts a password containing a slash, which is the case that lands here', () => {

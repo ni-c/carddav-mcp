@@ -60,6 +60,13 @@ export interface FakeOptions {
   /** Do not implement RFC 6578, so `list_changes` has to say so. */
   refuseSync?: boolean;
   /**
+   * Answer with this string as the `<D:sync-token>` instead of a generated one.
+   *
+   * The token is the one value in a `list_changes` answer that a DAV server
+   * chooses freely, and that answer deliberately carries no untrusted marker.
+   */
+  syncToken?: string;
+  /**
    * Answer a REPORT with hrefs pointing somewhere else than the collection
    * that was asked, the way a hostile or broken server can.
    */
@@ -90,6 +97,9 @@ export class FakeCardDav {
   readonly requests: { method: string; url: string; body?: string }[] = [];
   private sequence = 0;
   private syncCounter = 0;
+
+  /** Requests still to be answered 503 before the fake behaves. */
+  failNext = 0;
   private readonly options: FakeOptions;
 
   constructor(options: FakeOptions = {}) {
@@ -201,6 +211,14 @@ export class FakeCardDav {
 
     if (new URL(url).origin !== ORIGIN) {
       throw new Error(`the fake was asked for ${url}, which is another origin`);
+    }
+
+    // A transient outage: the first `failNext` requests answer 503, everything
+    // after them succeeds. What a DAV server restarting or a proxy having a bad
+    // ten seconds looks like from here.
+    if (this.failNext > 0) {
+      this.failNext -= 1;
+      return this.reply(503, 'temporarily unavailable');
     }
 
     if (method === 'OPTIONS') {
@@ -419,12 +437,10 @@ export class FakeCardDav {
       this.response(`${path}${name}`, `<${etag}>${resource.etag}</${etag}>`)
     );
     const token = this.tag('D:sync-token');
+    const value = this.options.syncToken ?? `sync-${this.syncCounter}`;
     return this.reply(
       207,
-      this.envelope(
-        parts.join(''),
-        `<${token}>sync-${this.syncCounter}</${token}>`
-      )
+      this.envelope(parts.join(''), `<${token}>${value}</${token}>`)
     );
   }
 

@@ -216,7 +216,10 @@ function shapeCommon(
     if (value !== undefined) out[key] = value;
   };
   set('uid', clean(readText(card, 'uid')));
-  set('etag', etag);
+  // The etag is the server's string, not the card author's — but it is still a
+  // stranger's string with no length of its own, and it sat next to eleven
+  // cleaned fields as the only raw one. Same two lines below in `shapeEntry`.
+  set('etag', clean(etag));
   set('formatted_name', clean(readText(card, 'fn')));
   set('name', name);
   set('nickname', clean(readText(card, 'nickname')));
@@ -237,7 +240,11 @@ function shapeCommon(
 
   if (info !== undefined) {
     const photo: Record<string, unknown> = { storage: info.storage };
-    if (info.mediaType !== undefined) photo.media_type = info.mediaType;
+    // `MEDIATYPE=` is a parameter the card author writes, so it is neither
+    // trustworthy nor bounded — `PHOTO;MEDIATYPE=<2000 characters>;ENCODING=b:`
+    // reached the model verbatim while the `uri` two lines below was cleaned.
+    const mediaType = clean(info.mediaType);
+    if (mediaType !== undefined) photo.media_type = mediaType;
     if (info.bytes !== undefined) photo.bytes = info.bytes;
     // Cleaned like any other field. This server never fetches it — that is the
     // whole reason `openWorldHint` is false — but it is still a string a
@@ -390,8 +397,12 @@ export function shapeAddressBook(
   };
   set('display_name', clean(book.displayName));
   set('description', clean(book.description));
-  set('ctag', book.ctag);
-  set('sync_token', book.syncToken);
+  // Both are opaque strings the DAV server chooses, of no fixed length and no
+  // fixed alphabet. Nothing downstream parses them, so cleaning costs nothing;
+  // leaving them raw put the one field a hostile server fully controls into the
+  // model's context unbounded.
+  set('ctag', clean(book.ctag));
+  set('sync_token', clean(book.syncToken));
   set('max_resource_size', book.maxResourceSize);
   const versions = book.supportedTypes.map((type) => type.version);
   if (versions.length > 0) out.supported_versions = [...new Set(versions)];
@@ -438,7 +449,7 @@ export function shapeGroup(
     if (value !== undefined) out[key] = value;
   };
   set('uid', clean(readText(card, 'uid')));
-  set('etag', etag);
+  set('etag', clean(etag));
   set('name', clean(readText(card, 'fn')));
   const note = readText(card, 'note');
   if (note !== undefined) out.note = sanitizeText(note);

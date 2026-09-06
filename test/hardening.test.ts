@@ -520,3 +520,47 @@ describe('a response header is somebody else’s text too', () => {
     expect(JSON.stringify(tokens)).not.toContain('\u200b');
   });
 });
+
+describe('a discovery failure is not permanent', () => {
+  it('retries after a transient error instead of memoising it', async () => {
+    // Discovery is a chain of guesses over a network, and the principal is
+    // memoised as a promise so four tool calls arriving together produce one
+    // discovery. A *rejected* promise was memoised too, which turned one 503
+    // into the same error on every tool call for the life of the process — the
+    // operator sees a permanently broken server where the outage lasted a
+    // second, and the only remedy is restarting the MCP server.
+    await open();
+    fake.failNext = 1;
+    const failed = await call(session, 'list_address_books');
+    expect((failed as { isError?: boolean }).isError).toBe(true);
+    expect(textOf(failed)).toMatch(/503/);
+
+    // Same session, same server object, nothing restarted.
+    const recovered = dataOf(await call(session, 'list_address_books'));
+    expect((recovered.address_books as unknown[]).length).toBeGreaterThan(0);
+  });
+});
+
+describe('a caller cannot smuggle a field into the card', () => {
+  it('strips unknown arguments rather than passing them upstream', async () => {
+    // The zod strip invariant, asserted against what actually goes on the
+    // wire. `z.object` strips and `pickFields` copies an explicit list, so
+    // this holds structurally — but it holds by two separate mechanisms, and
+    // either could be replaced by a passthrough without another test noticing.
+    await open();
+    await call(session, 'create_contact', {
+      address_book: 'work',
+      formatted_name: 'Ada Lovelace',
+      x_evil: 'X-INJECTED:value',
+      __proto__: { polluted: true },
+      raw_vcard: undefined,
+    } as Record<string, unknown>);
+
+    const put = fake.requests.find((request) => request.method === 'PUT');
+    expect(put?.body).toContain('FN:Ada Lovelace');
+    expect(put?.body).not.toContain('X-INJECTED');
+    expect(put?.body).not.toContain('x_evil');
+    expect(put?.body).not.toContain('polluted');
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+});

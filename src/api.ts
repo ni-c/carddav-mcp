@@ -471,6 +471,10 @@ export class CardDavApi {
       // Baikal only ships it when the vhost is configured for it.
       return {};
     }
+    // Nothing below reads the body, and an unread undici response holds its
+    // connection until the garbage collector gets to it. Every other path in
+    // this file drains through `readBoundedBody`; this one just discards.
+    await result.response.body?.cancel().catch(() => undefined);
     const location = result.headers.get('location');
     if (result.status >= 300 && result.status < 400 && location) {
       // RFC 6764 §6 lets this route redirect to a *different* host — it is how
@@ -534,7 +538,40 @@ export class CardDavApi {
 function parseSyncToken(xml: string): string | undefined {
   const match = /<(?:[a-z0-9]+:)?sync-token>([^<]*)<\//i.exec(xml);
   const value = match?.[1]?.trim();
-  return value === undefined || value === '' ? undefined : value;
+  if (value === undefined || value === '') return undefined;
+  return isOpaqueToken(value) ? value : undefined;
+}
+
+/** The longest sync token this server will carry. Real ones are URLs. */
+const MAX_SYNC_TOKEN_CHARS = 512;
+
+/**
+ * Whether a value is shaped like the token RFC 6578 §3 defines, which is a URI.
+ *
+ * Checked rather than cleaned, and that is the whole point. `list_changes`
+ * hands its answer over as **this server's own words** — the one result shape
+ * that deliberately carries no untrusted marker, on the grounds that it holds
+ * ids and statuses and no card content. A sync token is the exception hiding in
+ * that sentence: it is a string the DAV server chooses freely, and it arrived
+ * with no decoding, no sanitising and no length at all. A hostile or
+ * compromised server could put a paragraph of instructions in `<D:sync-token>`
+ * and have it delivered inside the envelope the design promises is safe to read
+ * as the server talking.
+ *
+ * Sanitising it is not available: the caller has to hand the token back
+ * verbatim on the next call, so NFKC-folding or truncating it would break
+ * incremental sync against a server doing nothing wrong. Validating it costs
+ * nothing instead — the RFC says URI, a URI has no spaces, and prose does.
+ * A value that fails is dropped, and the existing "answered without a sync
+ * token" note already tells the caller what that means for the next call.
+ */
+function isOpaqueToken(value: string): boolean {
+  return (
+    value.length <= MAX_SYNC_TOKEN_CHARS &&
+    // RFC 3986's unreserved + reserved + percent, and nothing else. No spaces,
+    // no controls, no invisibles.
+    /^[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]+$/.test(value)
+  );
 }
 
 /**

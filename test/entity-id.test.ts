@@ -220,3 +220,36 @@ describe('AddressBookRegistry', () => {
     expect(open.accepts(modern, '3.0')).toBe(false);
   });
 });
+
+describe('AddressBookRegistry — an entry written as a full URL', () => {
+  it('matches the configured origin', () => {
+    const byUrl = new AddressBookRegistry(all, [
+      'https://dav.example.net/tester/work/',
+    ]);
+    expect(byUrl.allowed().map((entry) => entry.path)).toEqual([
+      '/tester/work/',
+    ]);
+    expect(byUrl.unmatched()).toEqual([]);
+  });
+
+  it('does not match a different origin with the same path', () => {
+    // The regression: only the pathname was compared, so a fence entry that is
+    // wrong about the host failed *open* onto a same-named path on the
+    // configured server. Wrong direction for an allowlist — and it hid itself,
+    // because an entry that matches something never reaches `unmatched()`.
+    const elsewhere = new AddressBookRegistry(all, [
+      'https://someone-else.example/tester/work/',
+    ]);
+    expect(elsewhere.allowed()).toHaveLength(0);
+    expect(elsewhere.unmatched()).toEqual([
+      'https://someone-else.example/tester/work/',
+    ]);
+  });
+
+  it('does not match the same host on a different scheme', () => {
+    const plain = new AddressBookRegistry(all, [
+      'http://dav.example.net/tester/work/',
+    ]);
+    expect(plain.allowed()).toHaveLength(0);
+  });
+});

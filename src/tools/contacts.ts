@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 
-import { assess } from '../analyze.js';
+import { assess, sanitizeShortText } from '../analyze.js';
 import {
   SUMMARY_PROPS,
   syncCollectionBody,
@@ -25,6 +25,7 @@ import {
 import {
   errorResult,
   fencedUntrustedResult,
+  MAX_RESULT_BYTES,
   ownWordsResult,
   run,
   untrustedResult,
@@ -375,6 +376,19 @@ export function registerContactTools(
         };
         return {
           content: [
+            // The marker has to reach both channels. With the image block
+            // alone, a client that reads only `content` — which is every
+            // client that predates structured output — got a stranger's bytes
+            // with no framing at all, while `structuredContent` carried the
+            // `untrusted` field it never looked at.
+            {
+              type: 'text' as const,
+              text:
+                'Untrusted content from an address book: the image below was ' +
+                'uploaded by whoever wrote or last edited this card. Its ' +
+                `media type was determined from the bytes (${photo.mediaType}), ` +
+                'not from what the card claimed.',
+            },
             {
               type: 'image' as const,
               data: photo.data.toString('base64'),
@@ -436,9 +450,25 @@ export function registerContactTools(
         const exported: { id: string; vcard: string }[] = [];
 
         if (args.ids !== undefined) {
+          // One GET per id, sequentially, and each one carries its own 30-second
+          // timeout and its own 1 MiB read ceiling. Up to a hundred of those is
+          // fifty minutes and a hundred megabytes in the worst case, spent
+          // fetching cards the budget is about to drop anyway — so stop at the
+          // point where the answer can no longer grow. `limit` is the caller's
+          // ceiling on entries; `MAX_RESULT_BYTES` is the ceiling on the answer.
+          let bytes = 0;
           for (const id of args.ids) {
+            if (exported.length >= limit || bytes > MAX_RESULT_BYTES) break;
             const loaded = await loadById(context, registry, id);
+            bytes += loaded.vcf.length;
             exported.push({ id, vcard: loaded.vcf });
+          }
+          const unread = args.ids.length - exported.length;
+          if (unread > 0) {
+            collected.push(
+              `${unread} of the ${args.ids.length} ids were not fetched: the ` +
+                'answer was already full. Ask for them in a second call.'
+            );
           }
         } else {
           const book = registry.resolve(args.address_book as string);
@@ -486,6 +516,7 @@ export function registerContactTools(
             'The token from a previous call. Left out, this returns the ' +
               'current token and every card, which is the initial sync.'
           ),
+        limit: limitParam,
       }),
       annotations: READ_ONLY,
       // This server's own words: a list of ids and statuses, with no card
@@ -502,7 +533,14 @@ export function registerContactTools(
             .meta({ additionalProperties: true })
         ),
         removed: z.array(z.string()).describe('Ids of cards that are gone.'),
-        count: z.number().int(),
+        count: z
+          .number()
+          .int()
+          .describe('Entries in this answer, after any limit was applied.'),
+        total: z
+          .number()
+          .int()
+          .describe('Entries the server reported, before the limit.'),
         notes,
       }),
     },
@@ -532,12 +570,38 @@ export function registerContactTools(
           // of a multistatus, rather than straight off `props`: that is where
           // the entity decoding and the attribute-shaped-value refusal live,
           // and an ETag read raw arrives with its `&quot;` still in it.
-          const etag = textOf(response.props.getetag);
+          // Cleaned for the same reason every etag in `shape.ts` is: the value
+          // is the DAV server's, of no fixed length and no fixed alphabet, and
+          // this is the result that carries no untrusted marker — so an
+          // unbounded string here is an unmarked one, once per card.
+          const etag = sanitizeShortText(textOf(response.props.getetag) ?? '');
           changed.push({
             id,
-            ...(etag === undefined ? {} : { etag }),
+            ...(etag === '' ? {} : { etag }),
           });
         }
+
+        // The limit spans both lists, because the caller's concern is how much
+        // comes back, not which of the two halves it came from. `changed` is
+        // served first — a card that still exists is more actionable than the
+        // id of one that is gone — and `removed` takes whatever is left.
+        //
+        // Without this, the documented first call ("call it once without a
+        // token") returns one entry per card in the collection. On a company
+        // address book that is the whole book, and RFC 6578 puts no ceiling on
+        // it: measured at 20 000 entries the answer was 2.97 MB.
+        const total = changed.length + removed.length;
+        const limit = boundedLimit(
+          args.limit,
+          context.config.maxEntries,
+          MAX_MAX_ENTRIES
+        );
+        const changedShown = applyLimit(changed, limit);
+        const removedShown = applyLimit(
+          removed,
+          Math.max(0, limit - changedShown.shown.length)
+        );
+        const dropped = changedShown.dropped + removedShown.dropped;
 
         const collected: string[] = [];
         if (args.sync_token === undefined) {
@@ -545,6 +609,14 @@ export function registerContactTools(
             'No token was passed, so this is an initial synchronisation: ' +
               'every card in the book is reported as changed. Keep the ' +
               'sync_token and pass it next time.'
+          );
+        }
+        if (dropped > 0) {
+          collected.push(
+            `${dropped} more entr${dropped === 1 ? 'y' : 'ies'} changed than ` +
+              `the limit of ${limit}. Raise limit to see them — do **not** ` +
+              'keep the sync_token from this call as if it were complete, ' +
+              'because the entries left out here will not be reported again.'
           );
         }
         if (syncToken === undefined) {
@@ -555,14 +627,19 @@ export function registerContactTools(
           );
         }
 
-        return ownWordsResult({
-          address_book: book.path,
-          ...(syncToken === undefined ? {} : { sync_token: syncToken }),
-          changed,
-          removed,
-          count: changed.length + removed.length,
-          ...(collected.length > 0 ? { notes: collected } : {}),
-        });
+        return ownWordsResult(
+          {
+            address_book: book.path,
+            ...(syncToken === undefined ? {} : { sync_token: syncToken }),
+            changed: changedShown.shown,
+            removed: removedShown.shown,
+            count: changedShown.shown.length + removedShown.shown.length,
+            total,
+            ...(collected.length > 0 ? { notes: collected } : {}),
+          },
+          'Ask for fewer entries with `limit`, then call again with the same ' +
+            'sync_token to pick up the rest.'
+        );
       })
   );
 }

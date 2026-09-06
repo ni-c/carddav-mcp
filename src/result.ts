@@ -18,6 +18,30 @@ import {
 /** Hard ceiling on a single tool result, behind the per-tool caps. */
 export const MAX_RESULT_BYTES = 400_000;
 
+/**
+ * The size of a result as it actually goes out.
+ *
+ * Two corrections over `JSON.stringify(value).length`, which is what this used
+ * to measure, and both of them ran the same way — the budget accepted payloads
+ * larger than the ceiling it is named after:
+ *
+ * - **Pretty, not compact.** Every result here is emitted as
+ *   `JSON.stringify(value, null, 2)`. Measured on a 500-contact listing the
+ *   indented form is 1.36× the compact one, so a payload waved through at
+ *   399 KB left as 543 KB.
+ * - **Bytes, not UTF-16 code units.** `.length` counts units. A German or
+ *   Japanese address book is two or three bytes per character, against a
+ *   constant with `BYTES` in its name.
+ *
+ * The duplicate `structuredContent` is deliberately *not* counted twice: it
+ * carries the same value, a client renders one of the two, and charging for
+ * both would halve the useful answer for every caller to bound a worst case
+ * nobody reads.
+ */
+function emittedBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value, null, 2), 'utf8');
+}
+
 export function textResult(text: string): CallToolResult {
   return { content: [{ type: 'text', text }] };
 }
@@ -63,7 +87,7 @@ export function budget(
       notes: [
         ...existing,
         `${dropped} entr${dropped === 1 ? 'y was' : 'ies were'} left out to keep ` +
-          `the answer under ${maxBytes} characters. ${followUp}`,
+          `the answer under ${maxBytes} bytes. ${followUp}`,
       ],
     };
   };
@@ -71,7 +95,7 @@ export function budget(
   let current = data;
   let dropped = 0;
 
-  while (JSON.stringify(finished(current, dropped)).length > maxBytes) {
+  while (emittedBytes(finished(current, dropped)) > maxBytes) {
     const key = largestArrayKey(current);
     if (key === undefined) break;
     const list = current[key] as unknown[];
@@ -82,18 +106,28 @@ export function budget(
   }
 
   const result = finished(current, dropped);
-  if (JSON.stringify(result).length > maxBytes) {
+  if (emittedBytes(result) > maxBytes) {
     // Nothing left to drop, and the remainder still does not fit. That is a
     // refusal, so it becomes an error result — not an envelope of a shape the
     // tool never declared.
     throw new ResultTooLargeError(
-      `carddav-mcp: the answer exceeds ${maxBytes} characters even after ` +
+      `carddav-mcp: the answer exceeds ${maxBytes} bytes even after ` +
         `dropping entries. ${followUp}`
     );
   }
   return result;
 }
 
+/**
+ * The array that costs the most, if there is one.
+ *
+ * Top-level keys only. A tool whose payload is a single object rather than a
+ * list — `get_contact` — therefore has nothing to shrink and can only refuse: a
+ * card carrying a few thousand `EMAIL` properties makes that one call
+ * permanently unanswerable. That is the correct outcome (a declared error, not
+ * a silently maimed card) but it is worth knowing it is reached by having
+ * nothing to drop rather than by dropping everything.
+ */
 function largestArrayKey(data: Record<string, unknown>): string | undefined {
   let best: string | undefined;
   let bestSize = 0;
@@ -124,11 +158,12 @@ export function untrustedResult(
   followUp = 'Ask for fewer contacts with `limit`, or narrow the search.'
 ): CallToolResult {
   const { untrusted: _untrusted, source: _source, ...rest } = data;
-  const value = {
-    untrusted: true as const,
-    source: 'carddav' as const,
-    ...budget(rest, followUp),
-  };
+  // The markers go *through* the budget rather than on top of it, for the same
+  // reason the note does: what is measured has to be what is emitted.
+  const value = budget(
+    { untrusted: true, source: 'carddav', ...rest },
+    followUp
+  ) as Record<string, unknown> & { untrusted: true; source: 'carddav' };
   return {
     content: [{ type: 'text', text: JSON.stringify(value, null, 2) }],
     structuredContent: value,
@@ -141,11 +176,24 @@ export function untrustedResult(
  * Used for a confirmation, an id, a count — anything composed here rather than
  * read out of an address book. The marker has to keep meaning something, so it
  * does not go on an answer nobody else wrote.
+ *
+ * **Budgeted like everything else.** It was not, on the reasoning that this
+ * server's own words are short — true of a write confirmation and false of
+ * `list_changes`, whose whole job is to return one entry per changed card and
+ * whose documented first call is the one without a token, which reports *every*
+ * card in the book. Measured at 20 000 entries: 2.97 MB, past a ceiling of
+ * 400 000, in both channels. Composing a payload here is not the same as
+ * bounding it, and `budget` costs nothing when nothing has to be dropped — with
+ * `dropped === 0` it hands back the object it was given.
  */
-export function ownWordsResult(data: Record<string, unknown>): CallToolResult {
+export function ownWordsResult(
+  data: Record<string, unknown>,
+  followUp = 'Ask for fewer entries with `limit`.'
+): CallToolResult {
+  const value = budget(data, followUp);
   return {
-    content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
-    structuredContent: data,
+    content: [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+    structuredContent: value,
   };
 }
 
@@ -165,11 +213,10 @@ export function fencedUntrustedResult(
   warnings: readonly string[]
 ): CallToolResult {
   const { untrusted: _untrusted, source: _source, ...rest } = data;
-  const value = {
-    untrusted: true as const,
-    source: 'carddav' as const,
-    ...budget(rest, 'Ask for this card alone.'),
-  };
+  const value = budget(
+    { untrusted: true, source: 'carddav', ...rest },
+    'Ask for this card alone.'
+  ) as Record<string, unknown> & { untrusted: true; source: 'carddav' };
   const warning =
     warnings.length === 0
       ? ''

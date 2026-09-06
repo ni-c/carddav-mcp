@@ -125,13 +125,23 @@ export function modelFor(
   return version === '4.0' ? 'rfc' : 'apple';
 }
 
-/** Refuses an id that turned out to name a contact rather than a group. */
+/**
+ * Refuses an id that turned out to name a contact rather than a group.
+ *
+ * Both of these are reached from *always-registered* read tools — `get_group`
+ * calls this one, `get_contact` calls its twin below — so the way out they
+ * suggest may only name a tool that is always there too. They used to list the
+ * write tools as well, which under `CARDDAV_READ_ONLY=true`, or under
+ * `CARDDAV_ALLOW_TOOLS=essential` (which drops the group surface entirely),
+ * sent the model after tools missing from `tools/list`. A model reads that as a
+ * broken server rather than as a setting, and it cannot tell the difference.
+ */
 export function assertGroup(card: ICAL.Component, tool: string): GroupModel {
   const model = groupModelOf(card);
   if (model === undefined) {
     throw new ToolInputError(
       `carddav-mcp: that id names a contact, not a group, so ${tool} cannot ` +
-        'act on it. Use get_contact, update_contact or delete_contact instead.'
+        'act on it. get_contact reads it.'
     );
   }
   return model;
@@ -142,7 +152,7 @@ export function assertNotGroup(card: ICAL.Component, tool: string): void {
   if (isGroup(card)) {
     throw new ToolInputError(
       `carddav-mcp: that id names a group, not a contact, so ${tool} cannot ` +
-        'act on it. Use get_group, update_group or delete_group instead.'
+        'act on it. get_group reads it.'
     );
   }
 }

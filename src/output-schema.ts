@@ -33,19 +33,14 @@ export const untrustedFields = {
   source: z.literal('carddav').describe('Which backend this came from.'),
 };
 
-/** Warnings and explanations collected while answering. */
+/**
+ * Warnings and explanations collected while answering.
+ *
+ * This is also where the response budget writes when it has to drop entries, so
+ * there is no separate `truncated` shape — there used to be one, exported and
+ * declared by nothing, describing a block the budget never emitted.
+ */
 export const notes = z.array(z.string()).optional();
-
-/** What the budget attaches when it had to drop entries. */
-export const truncated = z
-  .looseObject({
-    shown: z.number().optional(),
-    total: z.number().optional(),
-    note: z.string().optional(),
-  })
-  .meta({ additionalProperties: true })
-  .optional()
-  .describe('Present only when entries were dropped to fit the budget.');
 
 /**
  * One typed value: an email address, a phone number, a URL, a chat handle.

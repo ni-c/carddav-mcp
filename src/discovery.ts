@@ -108,9 +108,23 @@ export class Discovery {
    * Memoised as a promise rather than as a value so that four tool calls
    * arriving together produce one discovery instead of four. Nothing about a
    * principal changes without a reconfiguration, so there is no TTL.
+   *
+   * **A rejection is not memoised**, and that asymmetry is the point. Discovery
+   * is a chain of guesses over a network, so it fails for reasons that pass: a
+   * DAV server restarting, a proxy answering 503 for ten seconds, a password
+   * rotated and put back. Caching the rejected promise turned one such moment
+   * into the same error on every tool call for the life of the process, with no
+   * remedy but restarting the MCP server — the operator sees a permanently
+   * broken server where the outage lasted a second. `registry()` below already
+   * clears its slot in a `finally`; this one only ever cleared it by succeeding.
    */
   async principal(): Promise<Principal> {
-    this.principalPromise ??= this.discoverPrincipal();
+    this.principalPromise ??= this.discoverPrincipal().catch(
+      (error: unknown) => {
+        this.principalPromise = undefined;
+        throw error;
+      }
+    );
     return this.principalPromise;
   }
 

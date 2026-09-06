@@ -62,9 +62,17 @@ function matches(entry: string, book: AddressBookEntry): boolean {
   const candidate = entry.trim();
   if (candidate.length === 0) return false;
 
+  // An entry written as a full URL has to agree about the **origin** as well as
+  // the path. Comparing the pathname alone made a fence entry that is wrong
+  // about the host fail *open*: `https://someone-else.example/dav/work/` granted
+  // `/dav/work/` on the configured server. That is the wrong direction for an
+  // allowlist, and it hides itself — the entry matches something, so the
+  // `unmatched()` warning that would have surfaced the typo never fires.
   if (/^https?:\/\//i.test(candidate)) {
     try {
-      return normalisePath(new URL(candidate).pathname) === book.path;
+      const url = new URL(candidate);
+      if (url.origin !== new URL(book.url).origin) return false;
+      return normalisePath(url.pathname) === book.path;
     } catch {
       return false;
     }
