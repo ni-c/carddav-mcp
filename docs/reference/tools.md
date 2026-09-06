@@ -121,6 +121,7 @@ Cards created, changed or deleted since a sync token, using RFC 6578. Call it on
 | --- | --- | --- | --- |
 | `address_book` | string | yes | An address book id from list_address_books — its collection path. A full URL or the final path segment work too. |
 | `sync_token` | string | no | The token from a previous call. Left out, this returns the current token and every card, which is the initial sync. |
+| `limit` | integer | no | How many entries to return. Defaults to CARDDAV_MAX_CONTACTS, at most 500. |
 
 ### `list_groups`
 
