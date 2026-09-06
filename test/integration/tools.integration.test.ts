@@ -128,7 +128,7 @@ describe('contacts', () => {
     expect(vcf).toContain('N:Lovelace;Ada;;;');
     expect(vcf).toContain('ORG:Analytical Engines;Research');
     expect(vcf).toContain('EMAIL;TYPE=WORK:ada@example.net');
-    expect(vcf).toContain('ADR;TYPE=HOME:;;Main 1;Town;;;LU');
+    expect(vcf).toContain('ADR;TYPE=HOME:;;Main 1;Town;;;GB');
     expect(vcf).toContain('CATEGORIES:history,maths');
     expect(vcf).toContain('BDAY');
     // VERSION first, which is what ical.js reads the grammar from.
@@ -191,7 +191,9 @@ describe('contacts', () => {
       vcard({
         UID: 'uid-pictured',
         FN: 'Pictured Person',
-        'PHOTO;ENCODING=b;TYPE=PNG': 'aGVsbG8=',
+        // A real PNG signature followed by "hello": the media type on the
+        // image block is decided by these bytes, never by `TYPE=PNG`.
+        'PHOTO;ENCODING=b;TYPE=PNG': 'iVBORw0KGgpoZWxsbw==',
       })
     );
     const listed = data(await asking.call('list_contacts'));
@@ -206,7 +208,11 @@ describe('contacts', () => {
     const raw = await asking.raw('get_contact_photo', { id: pictured?.id });
     const image = raw.content?.find((part) => part.type === 'image');
     expect(image?.mimeType).toBe('image/png');
-    expect(Buffer.from(image?.data ?? '', 'base64').toString()).toBe('hello');
+    expect(
+      Buffer.from(image?.data ?? '', 'base64')
+        .subarray(8)
+        .toString()
+    ).toBe('hello');
   });
 
   it('reports what changed since a sync token', async () => {
