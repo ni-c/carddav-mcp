@@ -20,12 +20,12 @@
     "url": "https://github.com/ni-c/carddav-mcp",
     "source": "github"
   },
-  "version": "0.1.0",
+  "version": "0.1.1",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@ni-c/carddav-mcp",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "transport": {
         "type": "stdio"
       },
@@ -108,7 +108,7 @@
     },
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/ni-c/carddav-mcp:0.1.0",
+      "identifier": "ghcr.io/ni-c/carddav-mcp:0.1.1",
       "transport": {
         "type": "stdio"
       },
