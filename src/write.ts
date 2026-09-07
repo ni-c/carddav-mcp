@@ -1,7 +1,5 @@
 import { createHash } from 'node:crypto';
 
-import { setResourceKey } from 'mcp-approval';
-
 import type { CardDavApi } from './api.js';
 import { resourceUrl, type AddressBookEntry } from './books.js';
 import { PreconditionFailedError, ToolInputError } from './errors.js';
@@ -185,32 +183,6 @@ export function keyPart(value: string | null | undefined): string {
   if (value === undefined) return '\u0000absent';
   if (value === null) return '\u0000null';
   return `s:${value}`;
-}
-
-/**
- * A resource key whose parts are bound to their *positions*.
- *
- * `setResourceKey` sorts its targets before hashing — it is written for sets,
- * where `["5","12"]` and `["12","5"]` are the same thing. The keys here are
- * tuples, and sorting a tuple throws its positions away: `update_group` put
- * `keyPart(name)` and `keyPart(note)` in the same list, both spelled
- * `s:<text>`, so a token issued for `{name: "Team", note: "internal"}` also
- * executed `{name: "internal", note: "Team"}`; `move_contact` put the source
- * and the destination in one list, so an approval to move a card from Work to
- * Private also authorised moving a card of the same name from Private to
- * Work. Each part is prefixed with its index and a NUL, which no part can
- * contain (`schema.ts` refuses control characters on the way in, and a path
- * with a NUL never leaves `entity-id.ts`), so two different tuples cannot
- * sort into the same set.
- */
-export function orderedResourceKey(
-  operation: string,
-  parts: readonly string[]
-): string {
-  return setResourceKey(
-    operation,
-    parts.map((part, index) => `${index}\u0000${part}`)
-  );
 }
 
 /** How many properties a write touches, for the approval dialog. */

@@ -1,3 +1,4 @@
+import { orderedResourceKey } from 'mcp-approval';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { sanitizeShortText } from '../src/analyze.js';
@@ -19,7 +20,6 @@ import {
 } from '../src/result.js';
 import { shapeAddressBook, shapeFull, shapeGroup } from '../src/shape.js';
 import { parseVCard, photoBytes, photoInfo } from '../src/vcard.js';
-import { orderedResourceKey } from '../src/write.js';
 import {
   call,
   confirmed,
