@@ -1,6 +1,6 @@
 {
   "name": "@ni-c/carddav-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "mcpName": "io.github.ni-c/carddav-mcp",
   "description": "Model Context Protocol (MCP) server for CardDAV address books: contacts, groups and photos",
   "keywords": [
@@ -57,7 +57,7 @@
     "@modelcontextprotocol/server": "^2.0.0",
     "fast-xml-parser": "^5.11.1",
     "ical.js": "^2.2.1",
-    "mcp-approval": "^0.8.1",
+    "mcp-approval": "^0.8.2",
     "mcp-internal-hosts": "^0.2.1",
     "mcp-tool-allowlist": "^0.2.1",
     "undici": "^8.10.2",
