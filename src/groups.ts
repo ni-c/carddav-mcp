@@ -50,14 +50,17 @@ export async function listGroups(
   const groups: GroupDocument[] = [];
   let unreadable = 0;
   for (const document of documents) {
+    // Parsing and the first read in one guard: the parser is lazy, and a
+    // value it cannot decode surfaces on the read, not on the parse.
     let card: ICAL.Component;
+    let model: GroupModel | undefined;
     try {
       card = parseVCard(document.vcf, 'a card in the address book');
+      model = groupModelOf(card);
     } catch {
       unreadable += 1;
       continue;
     }
-    const model = groupModelOf(card);
     if (model === undefined) continue;
     groups.push({ document, card, model });
   }
@@ -85,13 +88,15 @@ export async function memberIndex(
   const index = new Map<string, MemberTarget>();
   let duplicates = 0;
   for (const document of await listCards(api, [book], SUMMARY_PROPS)) {
-    let card: ICAL.Component;
+    let uid: string | undefined;
+    let name: string | undefined;
     try {
-      card = parseVCard(document.vcf, 'a card in the address book');
+      const card = parseVCard(document.vcf, 'a card in the address book');
+      uid = readText(card, 'uid');
+      name = readText(card, 'fn');
     } catch {
       continue;
     }
-    const uid = readText(card, 'uid');
     if (uid === undefined) continue;
     // First card wins, and the collision is counted rather than resolved by
     // document order. A UID is the card's identity in every group that names
@@ -106,7 +111,7 @@ export async function memberIndex(
     }
     index.set(uid, {
       id: buildEntityId(book.path, document.resourceName),
-      name: readText(card, 'fn'),
+      name,
     });
   }
   return { index, duplicates };

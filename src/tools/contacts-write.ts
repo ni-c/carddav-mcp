@@ -1,3 +1,4 @@
+import { orderedResourceKey } from 'mcp-approval';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { Approver, ConfirmationStore } from 'mcp-approval';
@@ -33,7 +34,6 @@ import {
   createCard,
   deleteCard,
   hasAnyField,
-  orderedResourceKey,
   replaceCard,
   textDigest,
   type ContactFields,

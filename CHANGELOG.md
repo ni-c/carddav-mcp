@@ -11,6 +11,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
      marker last in the file so the link definitions come along. -->
 <!-- #region changelog -->
 
+## [0.1.2] - 2026-09-07
+
+The follow-ups from the caldav-mcp review of the same week, applied to the
+sibling: the same guard shape, the same property, one function moved to the
+library it belongs to.
+
+### Fixed
+
+- **`list_groups` survives a card that shapes badly.** The parser is lazy: a
+  value it cannot decode throws on the read, not on the parse. `list_contacts`
+  has guarded parsing and shaping together since 0.1.1; `list_groups` guarded
+  the parse only, so one such card took the whole listing down where an
+  unparseable one was merely counted. Shaping now happens inside the same
+  per-card guard and joins the same count, and the note says "could not be
+  read" rather than "could not be parsed" because it now covers both. The
+  three other places that guarded the parse alone — the local re-filter behind
+  `search_contacts`, the group scan, and the member index — read the card
+  inside the guard as well.
+
+### Changed
+
+- `orderedResourceKey` comes from mcp-approval 0.8.2 instead of a local copy.
+  Same function, same NUL-and-index prefix, one home. mcp-approval 0.8.1 also
+  made a sealed dialog answer single-use; this release carries that pin.
+
+### Added
+
+- A property test over the shape layer: for any card that parses, with any
+  value in any of the thirty-one properties this server reads, in either vCard
+  version, shaping does not throw, the result validates against the output
+  schema, and nothing it returns carries a raw control character. The examples
+  in the other files cover the values that were tried; this states the
+  contract over every value the generator can spell.
+
 ## [0.1.1] - 2026-09-06
 
 A security review of 0.1.0 — every module, the tests, the workflows and the
@@ -246,6 +280,7 @@ photos, on any server that speaks the standard.
   export that keeps the properties this server does not model — because an
   export that dropped them would be a backup that silently loses data.
 
+[0.1.2]: https://github.com/ni-c/carddav-mcp/releases/tag/v0.1.2
 [0.1.1]: https://github.com/ni-c/carddav-mcp/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ni-c/carddav-mcp/releases/tag/v0.1.0
 
