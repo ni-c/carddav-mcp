@@ -217,16 +217,19 @@ export async function searchCards(
   // The local pass, always. See the docblock: a server that returns too much
   // looks exactly like one that matched correctly.
   const matched = all.filter((document) => {
-    let card: ICAL.Component;
     try {
-      card = parseVCard(document.vcf, 'a card in the search result');
+      const card = parseVCard(document.vcf, 'a card in the search result');
+      return filters.some(({ field, term }) =>
+        fieldContains(card, field, term)
+      );
     } catch {
-      // An unparseable card cannot be matched, and dropping it here is right:
+      // An unreadable card cannot be matched, and dropping it here is right:
       // it would fail again in shaping, and a search is not the place to
-      // surface somebody's decade-old broken export.
+      // surface somebody's decade-old broken export. The match is inside the
+      // guard with the parse because the parser is lazy and a value it cannot
+      // decode throws on the read.
       return false;
     }
-    return filters.some(({ field, term }) => fieldContains(card, field, term));
   });
 
   if (matched.length < all.length) {

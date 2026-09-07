@@ -1,3 +1,4 @@
+import { orderedResourceKey } from 'mcp-approval';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { Approver, ConfirmationStore } from 'mcp-approval';
@@ -44,7 +45,6 @@ import {
   createCard,
   deleteCard,
   keyPart,
-  orderedResourceKey,
   replaceCard,
 } from '../write.js';
 import { CREATE, DELETE, READ_ONLY, REPLACE } from './annotations.js';
@@ -105,17 +105,29 @@ export function registerGroupReadTools(
           context.config.maxEntries,
           MAX_MAX_ENTRIES
         );
-        const { groups, unreadable } = await listGroups(context.api, books);
+        const listed = await listGroups(context.api, books);
 
-        const shaped = groups.map((group) =>
-          shapeGroup(
-            group.card,
-            group.document.book,
-            group.document.resourceName,
-            group.document.etag,
-            () => undefined
-          )
-        );
+        // Shaping inside a guard as well, as list_contacts does. A card that
+        // parses and then fails to shape is one bad card among many, not a
+        // reason to answer nothing; the unparseable ones were already counted
+        // and the shaping failures join the same count.
+        let unreadable = listed.unreadable;
+        const shaped: Record<string, unknown>[] = [];
+        for (const group of listed.groups) {
+          try {
+            shaped.push(
+              shapeGroup(
+                group.card,
+                group.document.book,
+                group.document.resourceName,
+                group.document.etag,
+                () => undefined
+              )
+            );
+          } catch {
+            unreadable += 1;
+          }
+        }
         shaped.sort((left, right) =>
           String(left.name ?? '').localeCompare(String(right.name ?? ''))
         );
@@ -125,7 +137,7 @@ export function registerGroupReadTools(
         if (dropped > 0) collected.push(limitNote(dropped, limit));
         if (unreadable > 0) {
           collected.push(
-            `${unreadable} card(s) could not be parsed and were left out.`
+            `${unreadable} card(s) could not be read and were left out.`
           );
         }
 
