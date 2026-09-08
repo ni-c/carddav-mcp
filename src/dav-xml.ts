@@ -105,42 +105,139 @@ export class XmlValueError extends Error {
  * document rather than a value — see {@link decodeAddressData}.
  */
 export function decodeXmlText(value: string): string {
-  return decode(value, false);
+  return decode(value, 'refuse');
 }
 
 /**
  * The same, for the one node whose content **is** a document.
  *
- * `address-data` is different from every other text node here, and the
- * difference is not cosmetic: sabre/dav encodes the vCard's own line endings as
- * `&#13;`, where Radicale writes them raw. With the strict rule above, every
- * card sabre returns comes back as `BEGIN:VCARD&#13;` and fails to parse — the
- * integration suite found this on its first run against Baikal, as three
- * unreadable cards and an empty listing.
+ * Two things happen here that happen nowhere else, and both come from the same
+ * property of `address-data`: it is a `stopNodes` entry, so the parser hands
+ * back its **raw source** rather than its text.
  *
- * So CR, LF and tab are decoded here. **That gives an attacker nothing**, which
- * is the whole argument for the exception rather than a tolerance of it: the
- * guard exists to stop a decoded control character *creating structure*, and in
- * this node a hostile server can create the same structure by sending a raw
- * CRLF instead, which no amount of entity handling would catch. What the guard
- * still buys is the other nodes — a `displayname` or a DAV error message, where
- * this server treats the value as one line and a smuggled CR would end it.
+ * **The packaging comes with it.** Raw source means the XML syntax that carried
+ * the document is still in the string — see {@link unwrapDocumentNode}, which
+ * takes it back off.
  *
- * Everything else stays refused here too: other C0 characters, C1, surrogates
- * and out-of-range references are emitted as their literal source text.
+ * **The entities come with it too**, and one of them is load-bearing. sabre/dav
+ * encodes the vCard's own line endings as `&#13;`, where Radicale writes them
+ * raw; under a rule that refuses every control reference, every card sabre
+ * returns reads `BEGIN:VCARD&#13;` and fails to parse. The integration suite
+ * found that on its first run against Baikal, as three unreadable cards and an
+ * empty listing.
+ *
+ * The rule is therefore `before-newline` rather than a blanket exception, and
+ * the difference is the whole point. A server that encodes line endings emits
+ * the reference **immediately before the real newline it stands for** — XML
+ * normalises a raw CR to LF on the way in, so escaping it is the only way to
+ * keep it, and legitimate rather than suspicious. A reference smuggled into a
+ * *value* has no real newline behind it: `FN:harmless&#13;&#10;EMAIL:x@y.z`
+ * stays literal and invents no second property. Same rule, same words, in
+ * caldav-mcp — the two servers used to disagree here, and both docblocks
+ * argued well for a rule that cannot be right in only one of them.
+ *
+ * Everything else stays refused: other C0 characters, C1, surrogates and
+ * out-of-range references are emitted as their literal source text.
  */
 export function decodeAddressData(value: string): string {
-  return decode(value, true);
+  return unwrapDocumentNode(value, (text) => decode(text, 'before-newline'));
 }
 
-function decode(value: string, allowLineBreaks: boolean): string {
+/**
+ * How a CR or LF reference is treated.
+ *
+ * - `refuse` — left as its literal source text. Every value outside the
+ *   document node, where a decoded newline would end a line this server reads
+ *   as one.
+ * - `before-newline` — decoded only where a real newline follows it, the shape
+ *   a server produces when it encodes its line endings. The document node, and
+ *   nothing else.
+ *
+ * There is deliberately no third setting for "decode them wherever they are".
+ * A server that encoded *both* halves of every line ending would leave no real
+ * newline for the reference to sit in front of, and such a document would come
+ * back as one unreadable line — but no server is known to do that, and the
+ * relaxation that would cover it is exactly the one the smuggled-property test
+ * exists to refuse. If a listing is ever empty against a server whose payload
+ * is full of `&#13;&#10;`, this is the decision to revisit, with a test for
+ * that server rather than a general loosening.
+ */
+type LineEndingPolicy = 'refuse' | 'before-newline';
+
+const CDATA_OPEN = '<![CDATA[';
+const CDATA_CLOSE = ']]>';
+
+/**
+ * Takes the XML packaging back off the raw source of a `stopNodes` node.
+ *
+ * `stopNodes` means "do not interpret this as markup", which is right — a
+ * vCard containing a `<` is a vCard, not an element. What it does not mean is
+ * "extract the text": the parser hands back the source between the tags
+ * verbatim, and everything XML allows as packaging comes along. Open-Xchange
+ * (mailbox.org) wraps the card in `<![CDATA[…]]>`, so the string starts
+ * `<![CDATA[BEGIN:VCARD` and no vCard parser will touch it. Against a real
+ * account that is an address book of 79 cards listing as empty.
+ *
+ * Splitting rather than stripping, because a CDATA section is not just
+ * punctuation: **inside it, `&amp;` is five characters, not one.** A card whose
+ * note came out of an HTML editor says `&amp;` and means it. So the decoder
+ * runs on the segments *outside* the sections only, and what is inside is taken
+ * as it stands.
+ *
+ * More than one section is ordinary, not exotic: `]]>` cannot appear inside
+ * CDATA, so a server splits a card containing that sequence into
+ * `…a]]]]><![CDATA[>b…` and expects the reader to join it back up.
+ *
+ * The `trim` belongs to the same idea. `trimValues: true` never reaches a stop
+ * node (measured), so a server that indents its response hands over
+ * `\n        BEGIN:VCARD…`, which fails to parse exactly as loudly and exactly
+ * as silently. Leading whitespace before `BEGIN:` is packaging too.
+ *
+ * **Not covered: XML comments.** They also survive into the raw source
+ * (measured), and no CardDAV server is known to write one inside
+ * `address-data`. If a listing is ever empty against a server this function
+ * already unwraps, that is the next thing to look at.
+ */
+function unwrapDocumentNode(
+  value: string,
+  decodeText: (text: string) => string
+): string {
+  let result = '';
+  let index = 0;
+  for (;;) {
+    // `indexOf`, never a pattern: this runs on a document a server chose the
+    // length of, and `test/linear-time.test.ts` holds the ceiling.
+    const start = value.indexOf(CDATA_OPEN, index);
+    if (start === -1) {
+      result += decodeText(value.slice(index));
+      break;
+    }
+    result += decodeText(value.slice(index, start));
+    const body = start + CDATA_OPEN.length;
+    const end = value.indexOf(CDATA_CLOSE, body);
+    if (end === -1) {
+      // Unterminated. The parser rejects the document before this point
+      // (measured), so this is the second belt: take the rest as it stands
+      // rather than decode something that announced itself as literal.
+      result += value.slice(body);
+      break;
+    }
+    result += value.slice(body, end);
+    index = end + CDATA_CLOSE.length;
+  }
+  return result.trim();
+}
+
+function decode(value: string, lineEndings: LineEndingPolicy): string {
   return value.replace(
     /&(?:(amp|lt|gt|quot|apos)|#(\d+)|#[xX]([0-9a-fA-F]+));/g,
     (
-      source,
+      source: string,
       named: string | undefined,
       dec: string | undefined,
-      hex: string | undefined
+      hex: string | undefined,
+      offset: number,
+      full: string
     ) => {
       if (named !== undefined) {
         return (
@@ -155,8 +252,14 @@ function decode(value: string, allowLineBreaks: boolean): string {
       if (code > 0x10ffff) return source;
       // Surrogates are not characters; a reference to one is malformed.
       if (code >= 0xd800 && code <= 0xdfff) return source;
-      if (allowLineBreaks && (code === 0x0a || code === 0x0d)) {
-        return String.fromCodePoint(code);
+      if (code === 0x0a || code === 0x0d) {
+        if (
+          lineEndings === 'before-newline' &&
+          full.charCodeAt(offset + source.length) === 0x0a
+        ) {
+          return String.fromCodePoint(code);
+        }
+        return source;
       }
       // C0 and C1, tab excepted. This is the injection guard described above.
       if (code < 0x20 && code !== 0x09) return source;
@@ -202,6 +305,12 @@ export function assertNoDoctype(xml: string, what: string): void {
  * `parseTagValue: false` because an ETag of `"00123"` must stay a string, and
  * `stopNodes` because `address-data` is a document in its own right that has no
  * business being interpreted as markup.
+ *
+ * The price of that last one is worth naming: a stop node is handed back as
+ * **source**, not as text, so the parser's own conveniences skip it. Entities
+ * arrive undecoded, CDATA sections arrive with their markers, and
+ * `trimValues: true` does not reach it. {@link unwrapDocumentNode} is where
+ * that is paid off, and the reason a card from mailbox.org used to vanish.
  */
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -296,9 +405,10 @@ export function parseMultiStatus(xml: string, what: string): DavResponse[] {
     // an audit round found it.
     //
     // Through `decodeAddressData` rather than `decodeXmlText`: this is the one
-    // node whose content is a document in its own right, and sabre/dav encodes
-    // that document's line endings as `&#13;`. See the docblock there for why
-    // relaxing the guard for exactly this node costs nothing.
+    // node whose content is a document in its own right, so it needs the two
+    // things the parser skips for a stop node — its packaging taken off (CDATA
+    // markers, indentation) and its line endings read the way the server that
+    // encoded them meant them. See the docblock there.
     if (typeof props['address-data'] === 'string') {
       props['address-data'] = decodeAddressData(props['address-data']);
     }

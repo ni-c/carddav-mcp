@@ -11,6 +11,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
      marker last in the file so the link definitions come along. -->
 <!-- #region changelog -->
 
+## [0.1.3] - 2026-09-08
+
+### Fixed
+
+- **A card wrapped in `<![CDATA[…]]>` is read instead of counted as
+  unreadable.** `address-data` is a `stopNodes` entry, so the parser hands back
+  its raw source rather than its text — and the XML packaging comes with it.
+  Open-Xchange (mailbox.org) wraps the card, so every card arrived beginning
+  `<![CDATA[BEGIN:VCARD` and no vCard parser would touch it: an address book of
+  79 cards listed as empty, with a note saying 78 could not be parsed. The
+  sections are now taken off and joined, including the split a server has to
+  make around a card containing `]]>`. Entity references **inside** a section
+  are left alone, because that is what a CDATA section means: a note that says
+  `&amp;` says five characters, and it used to arrive as one.
+- **An indented response is read too.** `trimValues` does not reach a stop
+  node, so a server that pretty-prints its XML handed over
+  `\n        BEGIN:VCARD…`, and a vCard has to start at `BEGIN:`. Leading and
+  trailing whitespace is packaging as much as the CDATA markers are.
+
+### Changed
+
+- **A CR or LF reference is decoded only where a real newline follows it.**
+  sabre/dav encodes the vCard's own line endings as `&#13;` and has to: XML
+  normalises a raw CR to LF on the way in, so escaping it is the only way to
+  keep it. That shape — the reference immediately before the newline it stands
+  for — is now the whole of the exception. A reference smuggled into a _value_
+  has no real newline behind it, so `FN:harmless&#13;&#10;EMAIL:x@y.z` stays
+  literal and invents no second property. The relaxation used to cover both
+  code points everywhere in the card. caldav-mcp applies the same rule to
+  `calendar-data`; the two servers disagreed here, and only one of them could
+  have been right.
+- `mcp-tool-allowlist` 0.2.2.
+
 ## [0.1.2] - 2026-09-07
 
 The follow-ups from the caldav-mcp review of the same week, applied to the
@@ -280,6 +313,7 @@ photos, on any server that speaks the standard.
   export that keeps the properties this server does not model — because an
   export that dropped them would be a backup that silently loses data.
 
+[0.1.3]: https://github.com/ni-c/carddav-mcp/releases/tag/v0.1.3
 [0.1.2]: https://github.com/ni-c/carddav-mcp/releases/tag/v0.1.2
 [0.1.1]: https://github.com/ni-c/carddav-mcp/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ni-c/carddav-mcp/releases/tag/v0.1.0

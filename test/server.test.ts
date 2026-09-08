@@ -289,6 +289,24 @@ describe('list_contacts', () => {
     expect(data.count).toBe(1);
   });
 
+  it('reads a server that wraps the card in CDATA', async () => {
+    // The regression test for the Open-Xchange dialect, from the backend to the
+    // tool result rather than at the decoder. Against mailbox.org this listing
+    // was empty with a note saying 78 cards could not be parsed — the answer
+    // arrived in full, and every card in it began `<![CDATA[BEGIN:VCARD`.
+    await open({ addressData: 'cdata' });
+    const data = dataOf(await call(session, 'list_contacts'));
+    expect(
+      (data.contacts as Record<string, unknown>[]).map(
+        (contact) => contact.formatted_name
+      )
+    ).toEqual(['Ada Lovelace', 'Grace Hopper']);
+    // The count of unreadable cards is what the bug looked like from outside,
+    // so its absence is the thing to assert, not just the presence of names.
+    // The note that does belong here is the group card this listing left out.
+    expect((data.notes as string[]).join(' ')).not.toMatch(/could not be/);
+  });
+
   it('refuses a book outside the fence rather than saying it is missing', async () => {
     await open({}, { addressBooks: ['work'] });
     const result = await call(session, 'list_contacts', {

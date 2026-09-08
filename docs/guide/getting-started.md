@@ -37,6 +37,7 @@ principal and the address book home set are discovered from it.
 | Baikal | `https://example.net/dav.php` |
 | Radicale | `https://example.net:5232` |
 | Fastmail | `https://carddav.fastmail.com` |
+| mailbox.org | `https://dav.mailbox.org` |
 | iCloud | `https://contacts.icloud.com` |
 
 If all you have is the URL of a single address book — the one a desktop client's
