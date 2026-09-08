@@ -7,7 +7,7 @@ import {
   resourceUrl,
   stripTrailingSlashes,
 } from '../src/books.js';
-import { parseMultiStatus } from '../src/dav-xml.js';
+import { decodeAddressData, parseMultiStatus } from '../src/dav-xml.js';
 import { resourceNameOf } from '../src/entries.js';
 import { parseVCard, photoInfo } from '../src/vcard.js';
 import { ORIGIN, testConfig, USER } from './harness.js';
@@ -22,6 +22,10 @@ import { ORIGIN, testConfig, USER } from './harness.js';
  */
 
 const BUDGET_MS = 200;
+
+/** The CDATA markers, spelled here so the test does not import an internal. */
+const CDATA_OPEN = '<![CDATA[';
+const CDATA_CLOSE = ']]>';
 
 function timed(fn: () => unknown): number {
   const started = performance.now();
@@ -68,6 +72,20 @@ describe('runs in linear time', () => {
     let out: unknown[] = [];
     expect(timed(() => (out = parseMultiStatus(xml, 'x')))).toBeLessThan(2000);
     expect(out).toHaveLength(0);
+  });
+
+  it('decodeAddressData on a document made of CDATA openings', () => {
+    // The unwrapper walks the document with `indexOf` for exactly this reason.
+    // A pattern with `[^\]]*` between the markers would be retried from every
+    // position of a run that never closes — the shape this file exists for,
+    // on a string whose length the server chooses.
+    const openings = CDATA_OPEN.repeat(100_000);
+    expect(timed(() => decodeAddressData(openings))).toBeLessThan(BUDGET_MS);
+  });
+
+  it('decodeAddressData on half a megabyte of closed sections', () => {
+    const sections = `${CDATA_OPEN}a${CDATA_CLOSE}`.repeat(40_000);
+    expect(timed(() => decodeAddressData(sections))).toBeLessThan(BUDGET_MS);
   });
 
   it('the sanitisers on a megabyte of image markers', () => {

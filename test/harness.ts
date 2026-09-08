@@ -45,6 +45,16 @@ export interface FakeOptions {
   books?: FakeBook[];
   /** Emit sabre/dav's lowercase prefixes instead of Radicale's default namespace. */
   prefixes?: 'radicale' | 'sabre';
+  /**
+   * How the card is put inside `address-data`.
+   *
+   * The third server dialect, after Radicale's raw line endings and sabre/dav's
+   * `&#13;`: Open-Xchange (mailbox.org) wraps the card in a CDATA section. All
+   * three are legal XML and all three reach the reader as *source*, because
+   * `address-data` is a stop node — which is what made this one an address book
+   * of 79 cards listing as empty.
+   */
+  addressData?: 'escaped' | 'cdata';
   /** Refuse a text-match query without a collation, as some builds do. */
   refuseCollation?: boolean;
   /** Answer an addressbook-query with 501, as a server without filtering does. */
@@ -526,10 +536,11 @@ export class FakeCardDav {
     const data = this.card('address-data');
     const vcf =
       wanted === undefined ? resource.vcf : narrow(resource.vcf, wanted);
+    const body =
+      this.options.addressData === 'cdata' ? wrapCdata(vcf) : escapeXml(vcf);
     return this.response(
       this.options.forgeHrefs?.(path, name) ?? `${path}${name}`,
-      `<${etag}>${resource.etag}</${etag}>` +
-        `<${data}>${escapeXml(vcf)}</${data}>`
+      `<${etag}>${resource.etag}</${etag}><${data}>${body}</${data}>`
     );
   }
 
@@ -639,6 +650,17 @@ function propertyValues(vcf: string, field: string): string[] {
       return found === name;
     })
     .map((line) => line.slice(line.indexOf(':') + 1));
+}
+
+/**
+ * A CDATA section, split the way a server has to split one.
+ *
+ * `]]>` cannot appear inside a section, so a card containing that sequence ends
+ * the section and opens another around it. Writing it correctly here is what
+ * makes the reader's joining rule testable rather than assumed.
+ */
+function wrapCdata(value: string): string {
+  return `<![CDATA[${value.replaceAll(']]>', ']]]]><![CDATA[>')}]]>`;
 }
 
 function escapeXml(value: string): string {

@@ -6,6 +6,7 @@ import {
   parseEntityId,
   type AddressBookLookup,
 } from '../src/entity-id.js';
+import { decodeAddressData } from '../src/dav-xml.js';
 import { AddressBookNotAllowedError, ToolInputError } from '../src/errors.js';
 import { redactUnparsedUrl, redactUrlCredentials } from '../src/redact.js';
 import { resourceNameFor } from '../src/vcard.js';
@@ -234,6 +235,56 @@ describe('an unparsed URL hides by default', () => {
     fc.assert(
       fc.property(fc.string({ unit: 'binary' }), (value) => {
         expect(() => redactUnparsedUrl(value)).not.toThrow();
+      }),
+      RUNS
+    );
+  });
+});
+
+/**
+ * The property the Open-Xchange dialect broke.
+ *
+ * A CDATA section is a way of carrying text through XML unaltered, so
+ * unwrapping one has to give back exactly what the server put in — including
+ * the sequences that force it to split the section, which are the ones a
+ * hand-written example is least likely to try. Stating it over every string is
+ * the point: the card that got through was a card nobody had written down.
+ */
+/** How a server has to write one; `]]>` cannot appear inside a section. */
+function wrapCdata(value: string): string {
+  return `<![CDATA[${value.replaceAll(']]>', ']]]]><![CDATA[>')}]]>`;
+}
+
+describe('a CDATA section carries any text a server puts in it', () => {
+  it('unwraps to what was wrapped, whatever the card said', () => {
+    fc.assert(
+      fc.property(fc.string({ unit: 'binary' }), (text) => {
+        expect(decodeAddressData(wrapCdata(text))).toBe(text.trim());
+      }),
+      RUNS
+    );
+  });
+
+  it('leaves entity references inside a section untouched', () => {
+    // Inside CDATA `&amp;` is five characters and the card means them. This is
+    // why the decoder runs on the segments outside the sections only.
+    fc.assert(
+      fc.property(
+        fc.constantFrom('&amp;', '&#13;', '&#0;', '&lt;', '&#x0A;'),
+        (entity) => {
+          expect(decodeAddressData(wrapCdata(`NOTE:${entity}`))).toBe(
+            `NOTE:${entity}`
+          );
+        }
+      ),
+      RUNS
+    );
+  });
+
+  it('never throws, whatever a hostile server sends', () => {
+    fc.assert(
+      fc.property(fc.string({ unit: 'binary' }), (value) => {
+        expect(() => decodeAddressData(value)).not.toThrow();
       }),
       RUNS
     );

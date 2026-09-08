@@ -114,6 +114,14 @@ wrote something no parser accepts.
 without parsing it — which is also why it is the right tool for finding out what
 is wrong with one.
 
+If **every** card in every book is counted that way and the listing is empty,
+that is not a collection of bad exports — it is the reader and the server
+disagreeing about how the card was packed into the response. Versions before
+0.1.3 did that against Open-Xchange, which mailbox.org runs: the card arrives
+inside a `<![CDATA[…]]>` section, and `address-data` is read as raw source, so
+the section markers were part of what went to the vCard parser. Upgrading is
+the fix; there is no setting for it.
+
 ## Where the untrusted marker is, and is not
 
 Every answer built from card content carries `untrusted: true` and

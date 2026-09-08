@@ -92,8 +92,9 @@ describe('decodeAddressData', () => {
   });
 
   it('still refuses every other control character', () => {
-    // The relaxation is exactly two code points wide. A NUL or an escape
-    // reference stays literal here as it does everywhere else.
+    // The relaxation reaches CR and LF and no further, and even those only in
+    // the shape a server writes a line ending in. A NUL or an escape reference
+    // stays literal here as it does everywhere else.
     expect(decodeAddressData('a&#0;b')).toBe('a&#0;b');
     expect(decodeAddressData('a&#27;b')).toBe('a&#27;b');
     expect(decodeAddressData('a&#x7f;b')).toBe('a&#x7f;b');
@@ -108,6 +109,82 @@ describe('decodeAddressData', () => {
     // The guard still buys something: a `displayname` is one line to this
     // server, and a smuggled CR there would end it.
     expect(decodeXmlText('Work&#13;&#10;evil')).toBe('Work&#13;&#10;evil');
+  });
+
+  it('refuses a reference that no real newline follows', () => {
+    // The whole difference between a server encoding its line endings and a
+    // value trying to invent a property. This one is the second: the reference
+    // sits inside an FN, with the card's own newlines raw around it.
+    const smuggled =
+      'BEGIN:VCARD\nFN:harmless&#13;&#10;EMAIL:evil@example.net\nEND:VCARD';
+    const decoded = decodeAddressData(smuggled);
+    expect(decoded).toContain('&#13;&#10;');
+    expect(decoded.split('\n')).toHaveLength(3);
+  });
+
+  it('refuses a lone line-feed reference', () => {
+    // A server that encodes line endings writes the CR, because that is the
+    // half XML would otherwise normalise away. A lone `&#10;` is not that
+    // shape and stays literal.
+    expect(decodeAddressData('BEGIN:VCARD\nFN:a&#10;b\nEND:VCARD')).toContain(
+      'FN:a&#10;b'
+    );
+  });
+
+  it('refuses both halves even where that leaves the card unreadable', () => {
+    // The boundary, written down rather than left to be discovered. A server
+    // that encoded both halves of every line ending would leave no real
+    // newline for the reference to sit in front of, and this card stays one
+    // line. Loosening the rule to cover it is exactly the loosening the
+    // smuggled-property test above refuses, and no such server is known — so
+    // the choice is to keep the guard and fail visibly.
+    expect(decodeAddressData('BEGIN:VCARD&#13;&#10;END:VCARD')).toBe(
+      'BEGIN:VCARD&#13;&#10;END:VCARD'
+    );
+  });
+});
+
+describe('the packaging around a stop node', () => {
+  it('unwraps the CDATA that Open-Xchange puts a card in', () => {
+    // mailbox.org, and the reason an address book of 79 cards listed as empty:
+    // `stopNodes` hands back source, so the string began `<![CDATA[BEGIN:` and
+    // no vCard parser would touch it.
+    expect(
+      decodeAddressData('<![CDATA[BEGIN:VCARD\nFN:Ada\nEND:VCARD]]>')
+    ).toBe('BEGIN:VCARD\nFN:Ada\nEND:VCARD');
+  });
+
+  it('joins the sections a card containing "]]>" is split into', () => {
+    // Not exotic: `]]>` cannot appear inside CDATA, so a server that meets one
+    // ends the section and opens another, and expects the reader to join them.
+    expect(decodeAddressData('<![CDATA[NOTE:a]]]]><![CDATA[>b]]>')).toBe(
+      'NOTE:a]]>b'
+    );
+  });
+
+  it('leaves an entity inside a section alone and decodes one outside', () => {
+    // The reason this splits rather than strips. Inside CDATA `&amp;` is five
+    // characters and the card means them; outside it is one.
+    expect(
+      decodeAddressData('FN:Tom &amp; Jerry\n<![CDATA[NOTE:a &amp; b]]>')
+    ).toBe('FN:Tom & Jerry\nNOTE:a &amp; b');
+  });
+
+  it('takes an indented response apart', () => {
+    // `trimValues: true` never reaches a stop node, so a server that pretty
+    // prints hands over leading whitespace — and `BEGIN:` has to be first.
+    expect(
+      decodeAddressData('\n        <![CDATA[BEGIN:VCARD\nEND:VCARD]]>\n      ')
+    ).toBe('BEGIN:VCARD\nEND:VCARD');
+    expect(decodeAddressData('\n  BEGIN:VCARD\nEND:VCARD\n  ')).toBe(
+      'BEGIN:VCARD\nEND:VCARD'
+    );
+  });
+
+  it('takes the rest as it stands when a section is never closed', () => {
+    // The parser rejects such a document before this function sees it. This is
+    // the second belt, and it does not decode what announced itself literal.
+    expect(decodeAddressData('<![CDATA[FN:a &amp; b')).toBe('FN:a &amp; b');
   });
 });
 
