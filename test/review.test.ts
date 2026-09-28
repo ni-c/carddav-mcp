@@ -165,20 +165,20 @@ describe('approval keys are bound to positions, not to a set', () => {
   });
 });
 
-describe('a contact tool refuses a group', () => {
-  async function seedGroup(): Promise<string> {
-    fake.seed(
-      'work',
-      'team.vcf',
-      vcard({
-        UID: 'uid-team',
-        FN: 'Team',
-        'X-ADDRESSBOOKSERVER-KIND': 'group',
-      })
-    );
-    return firstId('list_groups');
-  }
+async function seedGroup(): Promise<string> {
+  fake.seed(
+    'work',
+    'team.vcf',
+    vcard({
+      UID: 'uid-team',
+      FN: 'Team',
+      'X-ADDRESSBOOKSERVER-KIND': 'group',
+    })
+  );
+  return firstId('list_groups');
+}
 
+describe('a contact tool refuses a group', () => {
   it('move_contact leaves a group where it is, without asking', async () => {
     await open('accept');
     const id = await seedGroup();

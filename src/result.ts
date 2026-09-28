@@ -279,6 +279,14 @@ export function fencedUntrustedResult(
 }
 
 /**
+ * Bytes one fence line costs as emitted: `wrapUntrusted` puts a datamark in
+ * front of every line, and a fence of many short lines is mostly datamarks.
+ */
+function marked(line: string): number {
+  return Buffer.byteLength(line, 'utf8') + DATAMARK_BYTES + 1;
+}
+
+/**
  * Keeps the fenced text under the same ceiling as the structured value.
  *
  * The fence is a third channel beside the two `budget` measures, and it went
@@ -290,10 +298,6 @@ export function fencedUntrustedResult(
  */
 function boundedFence(fenced: string, maxBytes = MAX_RESULT_BYTES): string {
   const lines = fenced.split('\n');
-  // Measured as emitted: `wrapUntrusted` puts a datamark in front of every
-  // line, and a fence of many short lines is mostly datamarks.
-  const marked = (line: string): number =>
-    Buffer.byteLength(line, 'utf8') + DATAMARK_BYTES + 1;
   if (lines.reduce((sum, line) => sum + marked(line), 0) <= maxBytes) {
     return fenced;
   }

@@ -64,6 +64,28 @@ const MAX_TOKEN_CHARS = 128;
 const MAX_TOKENS = 40;
 
 /**
+ * Splits a `DAV:` or `Allow` header into bounded, lowercased tokens.
+ *
+ * A response header is a string the far end chose, and `get_server_info`
+ * hands these straight to the model in this server's own voice — the one
+ * result in the file that is deliberately *not* marked untrusted, on the
+ * grounds that everything in it is a protocol token. That is only true if it
+ * is enforced here. Lowercasing already defangs `SYSTEM:`; it does nothing
+ * about a sentence, an invisible character, or a header long enough to fill
+ * the result budget on its own. A real compliance class is a token or a coded
+ * URL, and no server sends forty of them.
+ */
+function headerTokens(value: string | null): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((entry) =>
+      stripInvisible(entry).trim().toLowerCase().slice(0, MAX_TOKEN_CHARS)
+    )
+    .filter((entry) => entry.length > 0)
+    .slice(0, MAX_TOKENS);
+}
+
+/**
  * Ceiling on an error body that is read for its message.
  *
  * Separate from the ceilings above, and smaller than all of them: a body that
@@ -358,25 +380,9 @@ export class CardDavApi {
     const { ok, status, headers, response } = await this.send('OPTIONS', url);
     if (!ok) throw await this.failed(status, response, 'OPTIONS', url);
     await readBoundedBody(response, url, MAX_STATUS_BODY_BYTES);
-    // A response header is a string the far end chose, and `get_server_info`
-    // hands these two straight to the model in this server's own voice — the
-    // one result in the file that is deliberately *not* marked untrusted, on
-    // the grounds that everything in it is a protocol token. That is only true
-    // if it is enforced here. Lowercasing already defangs `SYSTEM:`; it does
-    // nothing about a sentence, an invisible character, or a header long
-    // enough to fill the result budget on its own. A real compliance class is
-    // a token or a coded URL, and no server sends forty of them.
-    const split = (value: string | null): string[] =>
-      (value ?? '')
-        .split(',')
-        .map((entry) =>
-          stripInvisible(entry).trim().toLowerCase().slice(0, MAX_TOKEN_CHARS)
-        )
-        .filter((entry) => entry.length > 0)
-        .slice(0, MAX_TOKENS);
     return {
-      dav: split(headers.get('dav')),
-      allow: split(headers.get('allow')),
+      dav: headerTokens(headers.get('dav')),
+      allow: headerTokens(headers.get('allow')),
     };
   }
 
