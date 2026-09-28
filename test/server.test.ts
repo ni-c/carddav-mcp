@@ -331,16 +331,16 @@ describe('list_contacts', () => {
   });
 });
 
-describe('get_contact', () => {
-  async function ada(): Promise<Record<string, unknown>> {
-    const listed = dataOf(await call(session, 'list_contacts'));
-    const [first] = listed.contacts as Record<string, unknown>[];
-    return dataOf(await call(session, 'get_contact', { id: first?.id }));
-  }
+async function fetchAda(): Promise<Record<string, unknown>> {
+  const listed = dataOf(await call(session, 'list_contacts'));
+  const [first] = listed.contacts as Record<string, unknown>[];
+  return dataOf(await call(session, 'get_contact', { id: first?.id }));
+}
 
+describe('get_contact', () => {
   it('returns the whole card, including what a listing leaves out', async () => {
     await open();
-    const data = await ada();
+    const data = await fetchAda();
     const contact = data.contact as Record<string, unknown>;
     expect(contact.note).toBe('First programmer.');
     expect(contact.birthday).toEqual({
