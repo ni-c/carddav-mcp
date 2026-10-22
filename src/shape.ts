@@ -253,9 +253,9 @@ function shapeCommon(
   if (emails.length > 0) out.emails = emails;
   const phones = shapeTyped(readTyped(card, 'tel'));
   if (phones.length > 0) out.phones = phones;
-  const categories = cleanList(
-    readList(card, 'categories').flatMap((value) => value.split(','))
-  );
+  // ical.js has already split the line on its unescaped commas; a comma still
+  // in a value was escaped, and belongs to that one category.
+  const categories = cleanList(readList(card, 'categories'));
   if (categories.length > 0) out.categories = categories;
 
   if (info !== undefined) {

@@ -11,6 +11,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
      marker last in the file so the link definitions come along. -->
 <!-- #region changelog -->
 
+## [0.1.4] - 2026-10-22
+
+### Fixed
+
+- **Every value of a comma-separated property is read, not only the first.**
+  ical.js splits a multi-value property on its unescaped commas while parsing,
+  and the readers asked it for the first value, so a card holding
+  `CATEGORIES:Handwerker,Zubau` was listed, fetched and searched as if it said
+  `Handwerker` alone (#34). A client that edits `categories` and writes the
+  list back would have deleted the rest. The same reader cut `NICKNAME:Bob,Rob`
+  to `Bob` in both vCard versions, and a vCard 3.0 `NOTE` written with an
+  unescaped comma — ical.js treats `NOTE` as multi-valued in 3.0 — up to that
+  comma. `search_contacts` now finds a contact by any of its values. Stored
+  cards were never changed by this.
+- **An escaped comma stays inside its category.** `CATEGORIES:Smith\, Jones,law`
+  is two categories, `Smith, Jones` and `law`, which is how the vCard grammar
+  reads it and how `categories` writes it. It came back as `Smith` and
+  `Jones`, with `law` lost to the bug above.
+
 ## [0.1.3] - 2026-09-08
 
 ### Fixed
@@ -313,6 +332,7 @@ photos, on any server that speaks the standard.
   export that keeps the properties this server does not model — because an
   export that dropped them would be a backup that silently loses data.
 
+[0.1.4]: https://github.com/ni-c/carddav-mcp/releases/tag/v0.1.4
 [0.1.3]: https://github.com/ni-c/carddav-mcp/releases/tag/v0.1.3
 [0.1.2]: https://github.com/ni-c/carddav-mcp/releases/tag/v0.1.2
 [0.1.1]: https://github.com/ni-c/carddav-mcp/releases/tag/v0.1.1
