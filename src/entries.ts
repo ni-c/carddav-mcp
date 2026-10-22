@@ -9,13 +9,7 @@ import {
   type VCardProp,
 } from './dav-xml.js';
 import { ToolInputError } from './errors.js';
-import {
-  parseVCard,
-  readList,
-  readText,
-  readTyped,
-  type ICAL,
-} from './vcard.js';
+import { parseVCard, readList, type ICAL } from './vcard.js';
 
 /**
  * The read pipeline: query a collection, get cards back, shape them.
@@ -267,15 +261,12 @@ export function fieldContains(
   );
 }
 
-/** Every string a field contributes, across all its occurrences. */
+/**
+ * Every string a field contributes, across all its occurrences and all the
+ * values of each — `CATEGORIES:history,maths` must be found by "maths".
+ */
 function valuesOf(card: ICAL.Component, field: VCardProp): string[] {
-  const name = field.toLowerCase();
-  const typed = readTyped(card, name).map((entry) => entry.value);
-  if (typed.length > 0) return typed;
-  const list = readList(card, name);
-  if (list.length > 0) return list;
-  const single = readText(card, name);
-  return single === undefined ? [] : [single];
+  return readList(card, field.toLowerCase());
 }
 
 /**

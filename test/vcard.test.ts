@@ -644,4 +644,88 @@ describe('readList', () => {
     );
     expect(readList(parsed, 'categories')).toEqual(['one', 'two']);
   });
+
+  // ical.js splits a multi-value property on its unescaped commas before we see
+  // it, so reading only the first value dropped the rest (#34).
+  it.each(['3.0', '4.0'])(
+    'reads every value of a comma-separated line in vCard %s',
+    (version) => {
+      const parsed = parseVCard(
+        card([
+          'BEGIN:VCARD',
+          `VERSION:${version}`,
+          'FN:x',
+          'CATEGORIES:Handwerker,Zubau',
+          'END:VCARD',
+        ]),
+        'a card'
+      );
+      expect(readList(parsed, 'categories')).toEqual(['Handwerker', 'Zubau']);
+    }
+  );
+
+  it('keeps document order across lines and values, and drops empty values', () => {
+    const parsed = parseVCard(
+      card([
+        'BEGIN:VCARD',
+        'VERSION:3.0',
+        'FN:x',
+        'CATEGORIES:a,,b',
+        'CATEGORIES:c',
+        'END:VCARD',
+      ]),
+      'a card'
+    );
+    expect(readList(parsed, 'categories')).toEqual(['a', 'b', 'c']);
+  });
+
+  it('keeps an escaped comma inside its value', () => {
+    const parsed = parseVCard(
+      card([
+        'BEGIN:VCARD',
+        'VERSION:4.0',
+        'FN:x',
+        'CATEGORIES:a\\,b,c',
+        'END:VCARD',
+      ]),
+      'a card'
+    );
+    expect(readList(parsed, 'categories')).toEqual(['a,b', 'c']);
+  });
+
+  it('returns an empty list for an absent property', () => {
+    const parsed = parseVCard(
+      card(['BEGIN:VCARD', 'VERSION:3.0', 'FN:x', 'END:VCARD']),
+      'a card'
+    );
+    expect(readList(parsed, 'categories')).toEqual([]);
+  });
+});
+
+const read = (version: string, line: string, name: string) =>
+  readText(
+    parseVCard(
+      card(['BEGIN:VCARD', `VERSION:${version}`, 'FN:x', line, 'END:VCARD']),
+      'a card'
+    ),
+    name
+  );
+
+describe('readText on a multi-value property', () => {
+  it.each(['3.0', '4.0'])('returns every nickname in vCard %s', (version) => {
+    expect(read(version, 'NICKNAME:Bob,Rob', 'nickname')).toBe('Bob,Rob');
+  });
+
+  it('returns a 3.0 note whole when it carries an unescaped comma', () => {
+    // NOTE is multi-valued in ical.js's 3.0 design, so the comma splits it.
+    expect(read('3.0', 'NOTE:call back, then pay', 'note')).toBe(
+      'call back, then pay'
+    );
+  });
+
+  it('leaves a single value and an escaped comma as they were', () => {
+    expect(read('4.0', 'NICKNAME:Bob', 'nickname')).toBe('Bob');
+    expect(read('3.0', 'TITLE:a\\, b', 'title')).toBe('a, b');
+    expect(read('3.0', 'NOTE:a\\, b', 'note')).toBe('a, b');
+  });
 });

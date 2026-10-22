@@ -352,6 +352,31 @@ describe('get_contact', () => {
     expect(contact.partial).toBeUndefined();
   });
 
+  it('returns every category of a comma-separated CATEGORIES line', async () => {
+    await open();
+    const data = await fetchAda();
+    const contact = data.contact as Record<string, unknown>;
+    expect(contact.categories).toEqual(['history', 'maths']);
+  });
+
+  it('keeps an escaped comma inside one category', async () => {
+    await open();
+    fake.seed(
+      'work',
+      'firm.vcf',
+      vcard({ UID: 'u-firm', FN: 'Firm', CATEGORIES: 'Smith\\, Jones,law' })
+    );
+    const listed = dataOf(await call(session, 'list_contacts'));
+    const firm = (listed.contacts as Record<string, unknown>[]).find(
+      (contact) => contact.formatted_name === 'Firm'
+    );
+    const data = dataOf(await call(session, 'get_contact', { id: firm?.id }));
+    expect((data.contact as Record<string, unknown>).categories).toEqual([
+      'Smith, Jones',
+      'law',
+    ]);
+  });
+
   it('fences the free text and marks it untrusted in both channels', async () => {
     await open();
     const listed = dataOf(await call(session, 'list_contacts'));
@@ -439,6 +464,17 @@ describe('search_contacts', () => {
       .slice(before)
       .filter((request) => request.method === 'REPORT');
     expect(reports).toHaveLength(3);
+  });
+
+  it('finds a contact by a category that is not the first on its line', async () => {
+    await open({ refuseFiltering: true });
+    const data = dataOf(
+      await call(session, 'search_contacts', {
+        query: 'maths',
+        fields: ['CATEGORIES'],
+      })
+    );
+    expect(data.count).toBe(1);
   });
 
   it('finds a contact by email address', async () => {

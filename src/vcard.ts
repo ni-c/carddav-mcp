@@ -233,24 +233,51 @@ export function propertyValue(prop: ICAL.Property): unknown {
   }
 }
 
-/** Reads a text property, or undefined when it is absent or empty. */
+/**
+ * All of a property's values, with the same fallback as `propertyValue`.
+ *
+ * ical.js splits a multi-value property on its unescaped commas while parsing
+ * — `CATEGORIES` and `NICKNAME` in both versions, and `NOTE` in 3.0 — so
+ * `CATEGORIES:Handwerker,Zubau` is one property holding two values, and the
+ * first value alone is half the line (#34).
+ */
+export function propertyValues(prop: ICAL.Property): unknown[] {
+  try {
+    return prop.getValues();
+  } catch {
+    return (prop.jCal as unknown[]).slice(3);
+  }
+}
+
+/**
+ * Reads a text property, or undefined when it is absent or empty.
+ *
+ * A property ical.js split into several values is joined back with the comma
+ * it was split on, which is the text the line holds: a 3.0 note written with
+ * an unescaped comma reads whole rather than up to that comma.
+ */
 export function readText(
   card: ICAL.Component,
   name: string
 ): string | undefined {
   const prop = card.getFirstProperty(name);
   if (prop === null || prop === undefined) return undefined;
-  const value = propertyValue(prop);
+  const values = propertyValues(prop);
+  const value =
+    values.length > 1
+      ? values.map((part) => String(part)).join(',')
+      : values[0];
   if (value === null || value === undefined) return undefined;
   const text = String(value).trim();
   return text.length > 0 ? text : undefined;
 }
 
-/** Every value of a property that may appear more than once. */
+/** Every value of a property that may appear more than once, on one line or several. */
 export function readList(card: ICAL.Component, name: string): string[] {
   return card
     .getAllProperties(name)
-    .map((prop) => String(propertyValue(prop) ?? '').trim())
+    .flatMap((prop) => propertyValues(prop))
+    .map((value) => String(value ?? '').trim())
     .filter((value) => value.length > 0);
 }
 
