@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Node.js 22 or newer, or Docker.
+- Node.js 24 or newer, or Docker.
 - A CardDAV server and an account on it.
 
 ## Credentials
