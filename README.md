@@ -75,7 +75,7 @@ against named injection shapes — including one for exactly that.
 
 ## Requirements
 
-- Node.js 22 or newer, or Docker
+- Node.js 24 or newer, or Docker
 - A CardDAV server and an account on it
 
 Most hosted services want an **app-specific password** rather than the account
